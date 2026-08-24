@@ -1,0 +1,66 @@
+Albatta! Linux (Ubuntu) tizimida Docker va loyihani boshqarish bo'yicha eng muhim buyruqlar:
+
+1. Loyihani (PostgreSQL, Redis, Django, Celery) Yoqish va O'chirish
+Loyiha papkasida (/home/asilbek/PycharmProjects/AI-Inbox-backend) turib quyidagi buyruqlar beriladi:
+
+🚀 Yoqish (Start):
+bash
+
+
+docker compose up -d
+-d bayrog'i (detached mode) — konteynerlarni orqa fonda tinchgina ishlatadi, terminal band bo'lib qolmaydi.
+
+🛑 O'chirish (Stop):
+bash
+
+
+docker compose stop
+Loyihani to'xtatadi. Ma'lumotlar bazangizdagi barcha ma'lumotlar xavfsiz saqlanib qoladi.
+
+🧹 Konteynerlarni o'chirish va tozalash:
+bash
+
+
+docker compose down
+Konteynerlarni to'xtatib, o'chiradi. (Ma'lumotlar bazasi volumesi saqlanadi).
+
+bash
+
+
+docker compose down -v
+-v bayrog'i — barcha ma'lumotlar bazasini ham to'liq noldan tozalab o'chiradi (agar noldan boshlamoqchi bo'lsangiz).
+
+📊 Holatni va Loglarni ko'rish:
+bash
+
+
+# Qaysi konteynerlar ishlayotganini ko'rish:
+docker compose ps
+# Xatolar yoki loglarni jonli kuzatish:
+docker compose logs -f
+2. Docker Servisining o'zini (Tizim darajasida) Yoqish va O'chirish
+Agar kompyuteringizda Docker servisining o'zi o'chiq bo'lsa:
+
+bash
+
+
+# Docker servisni yoqish:
+sudo systemctl start docker
+# Docker servisni o'chirish:
+sudo systemctl stop docker
+# Docker holatini tekshirish:
+sudo systemctl status docker
+# Kompyuter yoqilganda Docker avtomatik yonishi uchun:
+sudo systemctl enable docker
+💡 Eslab qoling: Odatda kundalik loyihada faqat shu ikkita buyruq kifoya qiladi:
+
+Loyihani yoqish: docker compose up -d
+Loyihani o'chirish: docker compose stop
+
+
+
+----------
+
+docker compose exec web python manage.py makemigrations
+
+docker compose exec web python manage.py migrate

@@ -3,5 +3,38 @@ name = "ai-inbox-backend"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
+    # --- Django Core ---
     "django>=6.1",
+    "djangorestframework>=3.16",
+    "djangorestframework-simplejwt>=5.4",
+    "django-cors-headers>=4.7",
+
+    # --- Database ---
+    "psycopg[binary]>=3.2",          # PostgreSQL adapter (yangi psycopg3)
+
+    # --- Environment ---
+    "python-dotenv>=1.1",
+
+    # --- Celery + Redis ---
+    "celery>=5.5",
+    "redis>=5.2",
+    "django-celery-beat>=2.7",       # Periodic tasks (Data Retention)
+    "django-celery-results>=2.5",    # Task natijalari DB'da
+
+    # --- AI ---
+    "google-generativeai>=0.8",      # Gemini API
+    "openai>=1.57",                  # OpenAI API (ixtiyoriy)
+
+    # --- Telegram Bot ---
+    "python-telegram-bot>=21.9",     # Async Telegram bot
+
+    # --- HTTP ---
+    "httpx>=0.28",                   # Async HTTP client (IG API uchun)
+
+    # --- Monitoring ---
+    "sentry-sdk[django,celery]>=2.19",
+
+    # --- Utilities ---
+    "pillow>=11.1",                  # Rasm ishlash (IG media uchun)
+    "python-dateutil>=2.9",
 ]

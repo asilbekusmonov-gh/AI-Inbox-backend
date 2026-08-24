@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+env/
+.venv/
+venv/
+ENV/
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+media/
+
+# Environment variables — HECH QACHON PUSH QILMANG!
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Docker
+*.env.docker
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# uv
+.uv/
+uv.lock

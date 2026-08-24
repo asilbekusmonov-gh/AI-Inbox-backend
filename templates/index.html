@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI Inbox — Multi-Store Marketplace & AI Mini App</title>
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --surface-bg: #111827;
+            --card-bg: rgba(17, 24, 39, 0.75);
+            --card-hover: rgba(31, 41, 55, 0.85);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --border-glow: rgba(139, 92, 246, 0.3);
+            
+            --primary-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
+            --glow-gradient: radial-gradient(circle, rgba(139, 92, 246, 0.18) 0%, transparent 70%);
+            
+            --accent-purple: #8b5cf6;
+            --accent-pink: #ec4899;
+            
+            --text-main: #f9fafb;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            
+            --success-color: #10b981;
+            --success-bg: rgba(16, 185, 129, 0.15);
+            --warning-color: #f59e0b;
+            --danger-color: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .ambient-glow {
+            position: fixed;
+            top: -120px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 400px;
+            background: var(--glow-gradient);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* Header */
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(11, 15, 25, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 14px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .brand-logo {
+            width: 36px;
+            height: 36px;
+            background: var(--primary-gradient);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 16px;
+            color: white;
+            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
+        }
+
+        .role-switcher {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border-color);
+            padding: 4px;
+            border-radius: 12px;
+            display: flex;
+            gap: 4px;
+        }
+
+        .role-btn {
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .role-btn.active {
+            background: var(--primary-gradient);
+            color: white;
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+        }
+
+        /* App Body */
+        .app-body {
+            flex: 1;
+            display: flex;
+            z-index: 1;
+        }
+
+        /* Sidebar Navigation */
+        .sidebar {
+            width: 240px;
+            background: rgba(17, 24, 39, 0.6);
+            backdrop-filter: blur(12px);
+            border-right: 1px solid var(--border-color);
+            padding: 20px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: left;
+            width: 100%;
+        }
+
+        .nav-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-main);
+        }
+
+        .nav-item.active {
+            background: rgba(139, 92, 246, 0.15);
+            color: var(--accent-purple);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+        }
+
+        /* Main Workspace */
+        .main-content {
+            flex: 1;
+            padding: 24px;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* Grid Cards */
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 18px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 18px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .card:hover {
+            border-color: var(--border-glow);
+            transform: translateY(-2px);
+            background: var(--card-hover);
+        }
+
+        .store-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            background: rgba(139, 92, 246, 0.15);
+            color: #c084fc;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .price-tag {
+            font-size: 18px;
+            font-weight: 800;
+            color: #c084fc;
+            margin-top: 10px;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 12px 18px;
+            border-radius: 12px;
+            border: none;
+            background: var(--primary-gradient);
+            color: white;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+        }
+
+        .btn:hover { opacity: 0.95; transform: translateY(-1px); }
+
+        .btn-cart {
+            background: rgba(16, 185, 129, 0.2);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            box-shadow: none;
+        }
+
+        .btn-cart:hover {
+            background: var(--success-color);
+            color: white;
+        }
+
+        /* Floating Cart Bar */
+        .cart-float-bar {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            left: 20px;
+            max-width: 500px;
+            margin: 0 auto;
+            background: rgba(17, 24, 39, 0.95);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--accent-purple);
+            padding: 14px 20px;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 20px rgba(139, 92, 246, 0.3);
+            z-index: 999;
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Tab Displays */
+        .tab-display { display: none; }
+        .tab-display.active { display: block; animation: fadeIn 0.3s ease; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Mobile Bottom Nav */
+        .mobile-tabs {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(11, 15, 25, 0.95);
+            backdrop-filter: blur(16px);
+            border-top: 1px solid var(--border-color);
+            padding: 8px 0;
+            z-index: 1000;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar { display: none; }
+            .mobile-tabs { display: flex; justify-content: space-around; }
+            .main-content { padding: 16px; margin-bottom: 80px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="ambient-glow"></div>
+
+    <!-- Header -->
+    <div class="header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div class="brand-logo">AI</div>
+            <div>
+                <div style="font-size: 16px; font-weight: 800; background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">AI Inbox Marketplace</div>
+                <div style="font-size: 11px; color: var(--text-muted);" id="mode-subtitle">Xaridor Vitrinasi Rejimi</div>
+            </div>
+        </div>
+
+        <div class="role-switcher">
+            <button class="role-btn active" id="btn-mode-buyer" onclick="switchUserRole('buyer')">🛍️ Xaridor</button>
+            <button class="role-btn" id="btn-mode-admin" onclick="switchUserRole('admin')">👨‍💼 Do'kon Egasi</button>
+        </div>
+    </div>
+
+    <!-- App Body Layout -->
+    <div class="app-body">
+
+        <!-- Sidebar (Desktop) -->
+        <div class="sidebar">
+            <!-- Buyer Nav -->
+            <div id="buyer-nav">
+                <button class="nav-item active" onclick="switchTab('stores', this)">
+                    <span>🏪 Bizneslar / Do'konlar</span>
+                </button>
+                <button class="nav-item" onclick="switchTab('catalog', this)">
+                    <span>📦 Barcha Mahsulotlar</span>
+                </button>
+            </div>
+            <!-- Admin Nav -->
+            <div id="admin-nav" style="display: none;">
+                <button class="nav-item" onclick="switchTab('admin-orders', this)">
+                    <span>🛍️ Kelgan Buyurtmalar</span>
+                </button>
+                <button class="nav-item" onclick="switchTab('admin-products', this)">
+                    <span>📦 Katalog Boshqaruvi</span>
+                </button>
+                <button class="nav-item" onclick="switchTab('admin-settings', this)">
+                    <span>⚙️ AI Prompt Sozlash</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Workspace -->
+        <div class="main-content">
+
+            <!-- 1. BIZNESLAR / DO'KONLAR LIST (BUYER) -->
+            <div id="view-stores" class="tab-display active">
+                <div style="margin-bottom: 20px;">
+                    <h2 style="font-size: 20px; font-weight: 800;">🏪 Mavjud Bizneslar va Do'konlar</h2>
+                    <p style="font-size: 13px; color: var(--text-secondary);">O'zingizga kerakli biznes yoki do'konni tanlang</p>
+                </div>
+
+                <div class="cards-grid">
+                    <div class="card" onclick="filterByStore('Zulfiya Fashion Demo')">
+                        <div>
+                            <span class="store-badge">👗 Kiyim & Poyabzal</span>
+                            <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 6px;">Zulfiya Fashion Demo</h3>
+                            <p style="font-size: 13px; color: var(--text-secondary);">Ayollar va erkaklar uchun zamonaviy kiyimlar hamda sport poyabzallari.</p>
+                        </div>
+                        <button class="btn btn-cart" style="margin-top: 16px;">Katalogni Ko'rish ➔</button>
+                    </div>
+
+                    <div class="card" onclick="filterByStore('IT Academy')">
+                        <div>
+                            <span class="store-badge" style="background: rgba(16,185,129,0.15); color: #34d399;">🎓 O'quv Markaz</span>
+                            <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 6px;">IT Academy Markazi</h3>
+                            <p style="font-size: 13px; color: var(--text-secondary);">Dasturlash, Grafik Dizayn va Sun'iy Idrok bo'yicha professional kurslar.</p>
+                        </div>
+                        <button class="btn btn-cart" style="margin-top: 16px;">Kurslarni Ko'rish ➔</button>
+                    </div>
+
+                    <div class="card" onclick="filterByStore('Gourmet Burger')">
+                        <div>
+                            <span class="store-badge" style="background: rgba(245,158,11,0.15); color: #fbbf24;">🍔 Restoran</span>
+                            <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 6px;">Gourmet Burger House</h3>
+                            <p style="font-size: 13px; color: var(--text-secondary);">Mazzali shirali burgerlar va tezkor yetkazib berish taomlari.</p>
+                        </div>
+                        <button class="btn btn-cart" style="margin-top: 16px;">Menyuni Ko'rish ➔</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. MAHSULOTLAR KATALOGI (BUYER) -->
+            <div id="view-catalog" class="tab-display">
+                <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <h2 style="font-size: 20px; font-weight: 800;" id="catalog-title">📦 Mahsulotlar Vitrinasi</h2>
+                        <p style="font-size: 13px; color: var(--text-secondary);">1-klikda savatga qo'shing va buyurtma bering</p>
+                    </div>
+                </div>
+
+                <div class="cards-grid" id="catalog-grid">
+                    <!-- Item 1 -->
+                    <div class="card">
+                        <div>
+                            <span class="store-badge">Zulfiya Fashion</span>
+                            <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 6px;">Nike Air Max 270 (Qora)</h3>
+                            <p style="font-size: 13px; color: var(--text-secondary);">Original Nike sport poyabzali. Razmerlar: 40, 41, 42.</p>
+                            <div class="price-tag">250,000 so'm</div>
+                        </div>
+                        <button class="btn btn-cart" style="margin-top: 14px;" onclick="addToCart('Nike Air Max 270 (Qora)', 250000)">🛒 Savatga qo'shish</button>
+                    </div>
+                    <!-- Item 2 -->
+                    <div class="card">
+                        <div>
+                            <span class="store-badge">Zulfiya Fashion</span>
+                            <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 6px;">Adidas Ultraboost 5.0 (Oq)</h3>
+                            <p style="font-size: 13px; color: var(--text-secondary);">Yugurish uchun qulay premium poyabzal.</p>
+                            <div class="price-tag">320,000 so'm</div>
+                        </div>
+                        <button class="btn btn-cart" style="margin-top: 14px;" onclick="addToCart('Adidas Ultraboost 5.0 (Oq)', 320000)">🛒 Savatga qo'shish</button>
+                    </div>
+                    <!-- Item 3 -->
+                    <div class="card">
+                        <div>
+                            <span class="store-badge">Zulfiya Fashion</span>
+                            <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 6px;">Nike Sport Futbolkasi (Kulrang)</h3>
+                            <p style="font-size: 13px; color: var(--text-secondary);">100% paxta, premium sifatli erkaklar futbolkasi.</p>
+                            <div class="price-tag">95,000 so'm</div>
+                        </div>
+                        <button class="btn btn-cart" style="margin-top: 14px;" onclick="addToCart('Nike Sport Futbolkasi', 95000)">🛒 Savatga qo'shish</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. ADMIN ORDERS VIEW (ADMIN) -->
+            <div id="view-admin-orders" class="tab-display">
+                <h2 style="font-size: 20px; font-weight: 800; margin-bottom: 16px;">🛍️ Kelib Tushgan Buyurtmalar (Admin)</h2>
+                <div class="cards-grid">
+                    <div class="card">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                            <span style="font-size: 13px; font-weight: 800; color: #c084fc;">#ORD-88491</span>
+                            <span style="background: rgba(99,102,241,0.2); color: #818cf8; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 700;">YANGI</span>
+                        </div>
+                        <div style="font-size: 14px; font-weight: 700;">Asilbek Usmonov (+998948111577)</div>
+                        <div style="font-size: 13px; color: var(--text-secondary); margin: 6px 0;">📍 Toshkent, Shayxontohur tumani</div>
+                        <div style="font-size: 14px; font-weight: 800; color: #a855f7; margin-top: 6px;">Nike Air Max 270 — 250,000 so'm</div>
+                        <div style="display: flex; gap: 8px; margin-top: 14px;">
+                            <button class="btn" style="background: var(--success-color);" onclick="alert('Tasdiqlandi!')">Tasdiqlash</button>
+                            <button class="btn" style="background: var(--danger-color);" onclick="alert('Bekor qilindi!')">Bekor qilish</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. ADMIN PRODUCTS VIEW (ADMIN) -->
+            <div id="view-admin-products" class="tab-display">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                    <h2 style="font-size: 20px; font-weight: 800;">📦 Mahsulotlar Boshqaruvi (Admin)</h2>
+                    <button class="btn" style="width: auto; padding: 8px 16px;" onclick="addProductAdmin()">+ Qo'shish</button>
+                </div>
+                <div class="cards-grid">
+                    <div class="card">
+                        <div style="font-size: 16px; font-weight: 700;">Nike Air Max 270 (Qora)</div>
+                        <div style="font-size: 13px; color: var(--text-secondary);">Stok: 12 dona</div>
+                        <div class="price-tag">250,000 so'm</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 5. ADMIN SETTINGS VIEW (ADMIN) -->
+            <div id="view-admin-settings" class="tab-display">
+                <h2 style="font-size: 20px; font-weight: 800; margin-bottom: 16px;">⚙️ AI Prompt va Do'kon Sozlamalari</h2>
+                <div class="card" style="max-width: 600px;">
+                    <div style="margin-bottom: 14px;">
+                        <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">Do'kon Nomi</label>
+                        <input type="text" value="Zulfiya Fashion Demo" style="width: 100%; padding: 12px; background: rgba(11,15,25,0.6); border: 1px solid var(--border-color); border-radius: 10px; color: white;">
+                    </div>
+                    <div style="margin-bottom: 14px;">
+                        <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">AI Prompt (Bot Yo'riqnomasi)</label>
+                        <textarea style="width: 100%; height: 100px; padding: 12px; background: rgba(11,15,25,0.6); border: 1px solid var(--border-color); border-radius: 10px; color: white;">Siz do'kon yordamchi AI sotuvchisisiz. Mijozlarga xushmuomala javob bering.</textarea>
+                    </div>
+                    <button class="btn" onclick="alert('Saqlandi!')">💾 Saqlash</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Floating Cart Bar for Buyer -->
+    <div class="cart-float-bar" id="cart-bar" style="display: none;">
+        <div>
+            <div style="font-size: 12px; color: var(--text-muted);">Savatda: <strong id="cart-count" style="color: white;">0</strong> ta mahsulot</div>
+            <div style="font-size: 16px; font-weight: 800; color: #c084fc;" id="cart-total">0 so'm</div>
+        </div>
+        <button class="btn" style="width: auto; padding: 10px 20px;" onclick="checkoutCart()">📦 Rasmiylashtirish</button>
+    </div>
+
+    <!-- Mobile Navigation Bar -->
+    <div class="mobile-tabs" id="mobile-nav">
+        <button class="nav-item active" onclick="switchTab('stores', this)">
+            <span>🏪 Do'konlar</span>
+        </button>
+        <button class="nav-item" onclick="switchTab('catalog', this)">
+            <span>📦 Vitrina</span>
+        </button>
+    </div>
+
+    <script>
+        const tg = window.Telegram?.WebApp;
+        let cart = [];
+        let currentRole = 'buyer';
+
+        if (tg) {
+            tg.ready();
+            tg.expand();
+            if (typeof tg.requestFullscreen === 'function') {
+                try { tg.requestFullscreen(); } catch (e) {}
+            }
+        }
+
+        function switchUserRole(role) {
+            currentRole = role;
+            document.getElementById('btn-mode-buyer').classList.toggle('active', role === 'buyer');
+            document.getElementById('btn-mode-admin').classList.toggle('active', role === 'admin');
+
+            document.getElementById('buyer-nav').style.display = role === 'buyer' ? 'block' : 'none';
+            document.getElementById('admin-nav').style.display = role === 'admin' ? 'block' : 'none';
+
+            document.getElementById('mode-subtitle').innerText = role === 'buyer' ? 'Xaridor Vitrinasi Rejimi' : 'Do\'kon Egasi Admin Rejimi';
+
+            if (role === 'buyer') {
+                switchTab('stores');
+            } else {
+                switchTab('admin-orders');
+            }
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-display').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+
+            const target = document.getElementById('view-' + tabId);
+            if (target) target.classList.add('active');
+
+            document.querySelectorAll(`.nav-item[onclick*="${tabId}"]`).forEach(btn => btn.classList.add('active'));
+
+            if (tg?.HapticFeedback) {
+                tg.HapticFeedback.impactOccurred('light');
+            }
+        }
+
+        function filterByStore(storeName) {
+            document.getElementById('catalog-title').innerText = '📦 ' + storeName + ' Katalogi';
+            switchTab('catalog');
+        }
+
+        function addToCart(name, price) {
+            cart.push({ name, price });
+            updateCartUI();
+            if (tg?.HapticFeedback) {
+                tg.HapticFeedback.notificationOccurred('success');
+            }
+        }
+
+        function updateCartUI() {
+            const bar = document.getElementById('cart-bar');
+            if (cart.length > 0) {
+                bar.style.display = 'flex';
+                document.getElementById('cart-count').innerText = cart.length;
+                const total = cart.reduce((sum, item) => sum + item.price, 0);
+                document.getElementById('cart-total').innerText = total.toLocaleString() + ' so\'m';
+            } else {
+                bar.style.display = 'none';
+            }
+        }
+
+        function checkoutCart() {
+            const name = prompt("Ismingiz:");
+            const phone = prompt("Telefon raqamingiz:");
+            if (name && phone) {
+                alert(`Rahmat ${name}! Buyurtmangiz qabul qilindi. Tez orada do'kon operatori bog'lanadi! ✅`);
+                cart = [];
+                updateCartUI();
+            }
+        }
+
+        function addProductAdmin() {
+            const name = prompt("Yangi mahsulot nomi:");
+            const price = prompt("Narxi (so'm):");
+            if (name && price) {
+                alert(`Yangi mahsulot katalogga qo'shildi: ${name}`);
+            }
+        }
+    </script>
+</body>
+</html>

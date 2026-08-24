@@ -1,22 +1,31 @@
 """
-URL configuration for ai_inbox_backend project.
-
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/6.1/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+AI-Inbox Backend — Asosiy URL konfiguratsiyasi
 """
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
+from django.views.generic import RedirectView
+from apps.core.views import twa_dashboard_view
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    # Bosh sahifa (http://localhost:8000/) kirilganda Swagger UI ga yo'naltiradi
+    path("", RedirectView.as_view(url="/api/v1/docs/", permanent=False)),
+
+    # Admin panel
+    path("admin/", admin.site.urls),
+
+    # Webhook endpointlar (Telegram + Instagram)
+    path("webhook/", include("apps.webhooks.urls", namespace="webhooks")),
+
+    # Telegram Mini App (TWA) Dashboard
+    path("app/", twa_dashboard_view, name="twa-dashboard"),
+
+    # API endpointlar v1
+    path("api/v1/", include("apps.api.urls", namespace="v1")),
 ]
+
+# Development rejimida media fayllarni serve qilish
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
