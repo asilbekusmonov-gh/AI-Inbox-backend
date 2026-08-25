@@ -53,6 +53,17 @@ class Product(BaseModel):
         null=True,
         help_text="Kategoriya (masalan: 'Poyabzal', 'Kiyim')"
     )
+    category_type = models.CharField(
+        max_length=30,
+        default="e_commerce",
+        db_index=True,
+        help_text="Mahsulot/Kurs/Xizmat sohasi (e_commerce, education, services)"
+    )
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Turli xil sohalarga mos dinamik ma'lumotlar (JSONB)"
+    )
     is_active = models.BooleanField(
         default=True,
         db_index=True,
@@ -81,8 +92,10 @@ class Product(BaseModel):
         if not store:
             return cls.objects.none()
 
+        cat_type = getattr(store, "category_type", "e_commerce") or "e_commerce"
         base_qs = cls.objects.filter(
             store=store,
+            category_type=cat_type,
             is_active=True,
             is_deleted=False
         )

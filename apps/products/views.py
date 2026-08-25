@@ -41,16 +41,19 @@ class ProductViewSet(viewsets.ModelViewSet):
         return first_store
 
     def get_queryset(self):
-        """Store bo'yicha filterlangan mahsulotlar ro'yxati"""
+        """Store va active category_type bo'yicha filterlangan mahsulotlar ro'yxati"""
         target_store = self._get_target_store()
         if not target_store:
             return Product.objects.none()
-        return Product.objects.filter(store=target_store, is_deleted=False)
+
+        cat_type = self.request.query_params.get("category_type") or getattr(target_store, "category_type", "e_commerce")
+        return Product.objects.filter(store=target_store, category_type=cat_type, is_deleted=False)
 
     def perform_create(self, serializer):
-        """Yangi mahsulot yaratilganda target store avtomatik DB'ga biriktiriladi"""
+        """Yangi mahsulot yaratilganda target store va uning category_type biriktiriladi"""
         target_store = self._get_target_store()
-        serializer.save(store=target_store)
+        cat_type = self.request.data.get("category_type") or getattr(target_store, "category_type", "e_commerce")
+        serializer.save(store=target_store, category_type=cat_type)
 
     def perform_destroy(self, instance):
         """Soft Delete: bazadan o'chirilmaydi, is_deleted=True bo'ladi"""

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import ChatMessage
+from .models import ChatMessage, BroadcastCampaign
 
 
 @admin.register(ChatMessage)
@@ -20,3 +20,10 @@ class ChatMessageAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         """Admin barcha yozuvlarni ko'rsin (o'chirilganlar ham)"""
         return self.model.all_objects.all()
+
+
+@admin.register(BroadcastCampaign)
+class BroadcastCampaignAdmin(admin.ModelAdmin):
+    list_display = ["title", "store", "status", "total_recipients", "sent_count", "failed_count", "created_at"]
+    list_filter = ["status", "store"]
+    search_fields = ["title", "message_text"]

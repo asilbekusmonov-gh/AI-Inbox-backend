@@ -65,10 +65,15 @@ def parse_telegram_payload(payload: dict) -> Optional[IncomingMessage]:
             )
             return None
 
-        # Matn bo'lmasa (rasm, sticker va h.k.) — hozircha o'tkazamiz
+        # Matn bo'lmasa, ovozli xabarlar (voice) mavjudligini tekshiramiz
         text = message.get("text", "").strip()
-        if not text:
-            logger.debug("Telegram: Matn bo'sh, o'tkazib yuborildi.")
+        voice = message.get("voice")
+        if not text and voice:
+            file_id = voice.get("file_id", "")
+            duration = voice.get("duration", 0)
+            text = f"🎙️ Ovozli xabar ({duration}s)"
+        elif not text:
+            logger.debug("Telegram: Matn yoki ovoz bo'sh, o'tkazib yuborildi.")
             return None
 
         sender = message.get("from", {})

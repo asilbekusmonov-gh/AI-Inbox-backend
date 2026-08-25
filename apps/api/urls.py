@@ -24,6 +24,8 @@ from drf_spectacular.views import (
     SpectacularRedocView,
 )
 
+from apps.stores.views import SuperAdminStatsView
+
 app_name = "api_v1"
 
 urlpatterns = [
@@ -42,4 +44,5 @@ urlpatterns = [
     path("orders/", include("apps.orders.urls")),
     path("customers/", include("apps.customers.urls")),
     path("chat/", include("apps.chat.urls")),
+    path("superadmin/stats/", SuperAdminStatsView.as_view(), name="superadmin_stats"),
 ]

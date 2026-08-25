@@ -33,15 +33,29 @@ class OrderViewSet(viewsets.ModelViewSet):
         target_store = self._get_target_store()
         if not target_store:
             return Order.objects.none()
-        
+
         qs = Order.objects.filter(store=target_store, is_deleted=False)
-        
-        # Status bo'yicha qo'shimcha filtr
+
+        # Status bo'yicha qo'shimcha filtr: "all" bo'lsa faqat faol (new va confirmed) ko'rsatiladi
         status_param = self.request.query_params.get("status")
-        if status_param:
+        if status_param == "all":
+            qs = qs.filter(status__in=["new", "confirmed"])
+        elif status_param:
             qs = qs.filter(status=status_param)
-            
-        return qs
+
+        # Qidiruv yoki show_all bo'lmasa: default sifatida oxirgi 30 kunlik (kamida 50 ta) buyurtmalar beriladi (Shopify style)
+        search_param = self.request.query_params.get("search")
+        show_all = self.request.query_params.get("show_all")
+        if not search_param and not show_all:
+            from django.utils import timezone
+            from datetime import timedelta
+            thirty_days_ago = timezone.now() - timedelta(days=30)
+            recent_ids = list(qs.filter(created_at__gte=thirty_days_ago).values_list("id", flat=True))
+            if len(recent_ids) < 50:
+                recent_ids = list(qs.order_by("-created_at")[:50].values_list("id", flat=True))
+            qs = qs.filter(id__in=recent_ids)
+
+        return qs.order_by("-created_at")
 
     def perform_destroy(self, instance):
         """Soft delete"""

@@ -152,3 +152,48 @@ class ChatMessage(BaseModel):
             message_id=message_id,
             platform=platform,
         ).exists()
+
+
+class BroadcastCampaign(BaseModel):
+    """
+    Ommaviy Reklama / Xabarnoma Kampaniyasi modeli.
+    Telegram SPAM Protection (rate_limit='25/s') bilan Celery orqali yuboriladi.
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Qoralama"
+        SENDING = "sending", "Yuborilmoqda"
+        COMPLETED = "completed", "Yakunlandi"
+        FAILED = "failed", "Xatolik"
+
+    store = models.ForeignKey(
+        "stores.Store",
+        on_delete=models.CASCADE,
+        related_name="broadcasts",
+        help_text="Qaysi do'konning reklamasi"
+    )
+    title = models.CharField(
+        max_length=255,
+        help_text="Kampaniya nomi (masalan: Bahor Chegirmasi)"
+    )
+    message_text = models.TextField(
+        help_text="Mijozlarga ommaviy yuboriladigan xabar matni"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        help_text="Kampaniya holati"
+    )
+    total_recipients = models.IntegerField(default=0, help_text="Jami yuborilishi kerak bo'lgan mijozlar soni")
+    sent_count = models.IntegerField(default=0, help_text="Muvaffaqiyatli yetib borgan xabarlar")
+    failed_count = models.IntegerField(default=0, help_text="Yetib bormagan xabarlar")
+    completed_at = models.DateTimeField(blank=True, null=True, help_text="Yakunlangan vaqti")
+
+    class Meta:
+        verbose_name = "Ommaviy Reklama Kampaniyasi"
+        verbose_name_plural = "Ommaviy Reklama Kampaniyalari"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.title} [{self.store.name}] → {self.sent_count}/{self.total_recipients}"

@@ -29,6 +29,11 @@ class Store(BaseModel):
         PRO = "pro", "Professional"
         ENTERPRISE = "enterprise", "Korporativ"
 
+    class CategoryType(models.TextChoices):
+        E_COMMERCE = "e_commerce", "E-commerce (Kiyim-kechak, kosmetika, do'konlar)"
+        EDUCATION = "education", "Ta'lim (O'quv markazlari, kurslar)"
+        SERVICES = "services", "Xizmat ko'rsatish (Go'zallik salonlari, klinikalar, va h.k.)"
+
     # ── Asosiy ma'lumotlar ──────────────────────────────────────
     owner = models.OneToOneField(
         User,
@@ -56,6 +61,12 @@ class Store(BaseModel):
         choices=Platform.choices,
         default=Platform.TELEGRAM,
         help_text="Qaysi platformada ishlaydi"
+    )
+    category_type = models.CharField(
+        max_length=30,
+        choices=CategoryType.choices,
+        default=CategoryType.E_COMMERCE,
+        help_text="Biznes sohasi/kategoriyasi"
     )
 
     # ── Instagram sozlamalari ──────────────────────────────────

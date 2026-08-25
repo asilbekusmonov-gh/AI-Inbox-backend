@@ -79,6 +79,10 @@ class Customer(BaseModel):
         default=True,
         help_text="Ushbu mijoz uchun AI bot faolmi? False bo'lsa operator qo'lda javob beradi"
     )
+    is_blocked = models.BooleanField(
+        default=False,
+        help_text="Mijoz bloklanganmi? True bo'lsa bot va operator xabarlari to'xtatiladi"
+    )
 
     class Meta:
         verbose_name = "Mijoz"
@@ -117,3 +121,29 @@ class Customer(BaseModel):
             platform_user_id=str(platform_user_id),
             defaults={"username": username},
         )
+
+
+class CustomerSession(BaseModel):
+    """
+    Single Master Bot Model uchun foydalanuvchining hozirgi aktiv do'kon sessiyasi.
+    Deep-link /start store_123 bosilganida avtomatik yangilanadi va o'tkaziladi.
+    """
+    platform_user_id = models.CharField(
+        max_length=100,
+        unique=True,
+        db_index=True,
+        help_text="Foydalanuvchi Telegram ID"
+    )
+    active_store = models.ForeignKey(
+        "stores.Store",
+        on_delete=models.CASCADE,
+        related_name="user_sessions",
+        help_text="Hozirgi muloqot qilayotgan do'koni"
+    )
+
+    class Meta:
+        verbose_name = "Mijoz Sessiyasi"
+        verbose_name_plural = "Mijoz Sessiyalari"
+
+    def __str__(self):
+        return f"User {self.platform_user_id} → {self.active_store.name}"

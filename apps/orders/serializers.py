@@ -26,6 +26,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "order_number",
             "platform",
             "channel",
+            "is_voice_order",
             "customer",
             "customer_full_name",
             "customer_phone",

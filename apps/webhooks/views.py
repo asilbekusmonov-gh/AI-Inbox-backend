@@ -83,6 +83,9 @@ class TelegramWebhookView(View):
             # Qo'llab-quvvatlanmaydigan update turi — OK qaytaramiz
             return HttpResponse(status=200)
 
+        # 4.5 Single Master Bot Multi-Tenant Routing (Deep-link & Session Router)
+        store = self._resolve_store_for_message(store, message)
+
         # 5. Celery navbatiga jo'natamiz (ASYNCHRONOUS!)
         try:
             task = process_incoming_message.apply_async(
@@ -115,6 +118,49 @@ class TelegramWebhookView(View):
 
         # 7. Telegram 200 kutadi — doim 200 qaytaramiz
         return HttpResponse(status=200)
+
+    def _resolve_store_for_message(self, default_store: Store, message) -> Store:
+        """
+        Single Master Bot Model uchun:
+        /start store_123 deep-linki yoki foydalanuvchining aktiv do'kon sessiyasi bo'yicha dinamik yo'naltiradi.
+        """
+        from apps.customers.models import CustomerSession
+        from django.db.models import Q
+
+        text = (message.text or "").strip()
+        sender_id = str(message.sender_id)
+
+        # 1. Deep-link /start store_123
+        if text.startswith("/start"):
+            parts = text.split()
+            if len(parts) > 1:
+                param = parts[1].strip()
+                target_key = param.replace("store_", "").strip()
+
+                target_store = Store.objects.filter(
+                    Q(id=target_key) | Q(slug=target_key) | Q(tg_owner_chat_id=target_key),
+                    is_active=True,
+                    is_deleted=False
+                ).first()
+
+                if target_store:
+                    CustomerSession.objects.update_or_create(
+                        platform_user_id=sender_id,
+                        defaults={"active_store": target_store}
+                    )
+                    return target_store
+
+        # 2. Mavjud active user session
+        sess = CustomerSession.objects.select_related("active_store").filter(
+            platform_user_id=sender_id,
+            active_store__is_active=True,
+            active_store__is_deleted=False
+        ).first()
+
+        if sess:
+            return sess.active_store
+
+        return default_store
 
     def _get_store_by_token(self, bot_token: str) -> Store | None:
         """Bot token bo'yicha aktiv do'konni topadi"""
@@ -263,7 +309,40 @@ class InstagramWebhookView(View):
 
 def webhook_health(request):
     """
-    Webhook server ishlayotganini tekshirish uchun oddiy endpoint.
-    Monitoring tizimi (UptimeRobot va h.k.) shu URL'ni ping qiladi.
+    Master SaaS Bot Gateway va Webhook serverining sog'lig'ini Telegram API /getMe orqali tekshirish.
     """
-    return JsonResponse({"status": "ok", "service": "AI-Inbox Webhooks"})
+    bot_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+    bot_username = "unknown"
+    bot_active = False
+
+    if bot_token:
+        try:
+            url = f"https://api.telegram.org/bot{bot_token}/getMe"
+            with httpx.Client(timeout=5.0) as client:
+                resp = client.post(url)
+                data = resp.json()
+                if resp.status_code == 200 and data.get("ok"):
+                    bot_active = True
+                    bot_username = data.get("result", {}).get("username", "unknown")
+                else:
+                    # Bot token yaroqsiz bo'lsa — do'kon egasiga zudlik bilan Telegram xabarnomasi
+                    from apps.stores.models import Store
+                    from apps.chat.senders import send_telegram_message
+                    stores = Store.objects.filter(is_active=True, is_deleted=False)
+                    for store in stores:
+                        if store.tg_owner_chat_id:
+                            send_telegram_message(
+                                bot_token=bot_token,
+                                chat_id=store.tg_owner_chat_id,
+                                text="🚨 DIQQAT! PLATFORMA TELEGRAM BOTI ALOQADAN UZILDI!\n\nBot tokeni yaroqsiz bo'ldi yoki Telegram API ishlamayapti. Iltimos, sozlamalarni tekshiring!"
+                            )
+        except Exception as e:
+            logger.error(f"Master Bot Health Check Exception: {e}")
+
+    return JsonResponse({
+        "status": "ok" if bot_active else "degraded",
+        "service": "AI-Inbox Master SaaS Gateway",
+        "bot_active": bot_active,
+        "bot_username": f"@{bot_username}" if bot_username != "unknown" else None,
+        "master_bot_model": True
+    })

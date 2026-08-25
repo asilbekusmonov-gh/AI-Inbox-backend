@@ -23,11 +23,8 @@ class Order(BaseModel):
     class Status(models.TextChoices):
         NEW = "new", "Yangi"
         CONFIRMED = "confirmed", "Tasdiqlangan"
-        PROCESSING = "processing", "Tayyorlanmoqda"
-        SHIPPED = "shipped", "Yo'lda"
-        DELIVERED = "delivered", "Yetkazildi"
+        COMPLETED = "completed", "Yakunlangan"
         CANCELLED = "cancelled", "Bekor qilindi"
-        REFUNDED = "refunded", "Qaytarildi"
 
     class Platform(models.TextChoices):
         INSTAGRAM = "instagram", "Instagram"
@@ -57,6 +54,10 @@ class Order(BaseModel):
         max_length=20,
         choices=Platform.choices,
         help_text="Buyurtma qaysi platforma orqali keldi"
+    )
+    is_voice_order = models.BooleanField(
+        default=False,
+        help_text="Mijoz ovozli muloqotni afzal ko'rishi yoki ovoz orqali berilgan buyurtma"
     )
 
     # ── Yetkazib berish ma'lumotlari (AI tomonidan olingan) ────
@@ -171,9 +172,33 @@ class Order(BaseModel):
     def update_status(self, new_status: str):
         """
         Buyurtma holatini yangilaydi va vaqtni qayd etadi.
-        Bevosita .status = ... ga yozmang — bu metoddan foydalaning.
+        Agar buyurtma bekor qilinsa (cancelled), mahsulotlar stokini omborga qaytaradi.
         """
         from django.utils import timezone
+        old_status = self.status
         self.status = new_status
         self.status_changed_at = timezone.now()
         self.save(update_fields=["status", "status_changed_at", "updated_at"])
+
+        # Bekor qilinganda stokni qaytarish
+        if new_status == self.Status.CANCELLED and old_status != self.Status.CANCELLED:
+            self._restock_items()
+
+
+
+    def _restock_items(self):
+        """Buyurtmadagi mahsulotlar stokini omborga qaytaradi"""
+        from apps.products.models import Product
+        if not self.items or not isinstance(self.items, list):
+            return
+
+        for item in self.items:
+            prod_id = item.get("id") or item.get("product_id")
+            qty = item.get("qty") or item.get("quantity") or 1
+            if prod_id:
+                try:
+                    product = Product.objects.get(id=prod_id, store=self.store)
+                    product.stock += int(qty)
+                    product.save(update_fields=["stock", "updated_at"])
+                except (Product.DoesNotExist, ValueError):
+                    pass

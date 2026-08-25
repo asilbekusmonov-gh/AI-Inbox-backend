@@ -24,6 +24,8 @@ class ProductSerializer(serializers.ModelSerializer):
             "stock",
             "sku",
             "category",
+            "category_type",
+            "metadata",
             "image_url",
             "is_active",
             "created_at",
@@ -54,3 +56,28 @@ class ProductSerializer(serializers.ModelSerializer):
             validated_data["description"] = f"[IMG: {str(img_url).strip()}]\n{desc}".strip()
 
         return Product.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        has_img_key = "image_url" in validated_data
+        img_url = validated_data.pop("image_url", None)
+
+        if "description" in validated_data:
+            desc = validated_data["description"] or ""
+            desc = re.sub(r"\[IMG:\s*(https?://[^\s\]]+|data:image/[^\s\]]+)\]\s*", "", desc).strip()
+        else:
+            desc = instance.description or ""
+            desc = re.sub(r"\[IMG:\s*(https?://[^\s\]]+|data:image/[^\s\]]+)\]\s*", "", desc).strip()
+
+        if has_img_key:
+            if img_url and str(img_url).strip():
+                validated_data["description"] = f"[IMG: {str(img_url).strip()}]\n{desc}".strip()
+            else:
+                validated_data["description"] = desc.strip()
+        elif "description" in validated_data:
+            old_img_match = re.search(r"\[IMG:\s*(https?://[^\s\]]+|data:image/[^\s\]]+)\]", instance.description or "")
+            if old_img_match:
+                old_img = old_img_match.group(1)
+                validated_data["description"] = f"[IMG: {old_img}]\n{desc}".strip()
+
+        return super().update(instance, validated_data)
+

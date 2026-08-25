@@ -134,8 +134,59 @@ def _send_telegram_chunk(
                 f"Telegram kutilmagan xato: {e}",
                 exc_info=True,
             )
-            return False
+    return False
 
+
+def send_telegram_voice(
+    bot_token: str,
+    chat_id: str,
+    voice_bytes: bytes,
+    caption: str = "",
+) -> bool:
+    """
+    Telegram bot API /sendVoice orqali ovozli xabarni foydalanuvchiga yuboradi.
+    """
+    if not bot_token or not chat_id or not voice_bytes:
+        logger.warning(f"send_telegram_voice: bo'sh parametr | chat_id={chat_id}")
+        return False
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendVoice"
+    files = {
+        "voice": ("voice.ogg", voice_bytes, "audio/ogg")
+    }
+    data = {
+        "chat_id": chat_id,
+    }
+    if caption:
+        data["caption"] = caption
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(url, data=data, files=files)
+            res_data = resp.json()
+            if resp.status_code == 200 and res_data.get("ok"):
+                logger.info(f"Ovozli xabar Telegram chat_id={chat_id}'ga muvaffaqiyatli yuborildi!")
+                return True
+            logger.error(f"Telegram sendVoice Error: {resp.status_code} | {res_data}")
+            return False
+    except Exception as e:
+        logger.error(f"Telegram voice sending exception: {e}", exc_info=True)
+        return False
+
+
+def send_voice_reply(
+    store,
+    platform: str,
+    chat_id: str,
+    voice_bytes: bytes,
+    caption: str = "",
+) -> bool:
+    """
+    Platformaga mos ravishda ovozli xabarni foydalanuvchiga yetkazadi.
+    """
+    bot_token = store.tg_bot_token or getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+    if platform.lower() == "telegram":
+        return send_telegram_voice(bot_token, chat_id, voice_bytes, caption)
     return False
 
 

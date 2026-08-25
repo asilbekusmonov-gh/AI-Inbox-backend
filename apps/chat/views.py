@@ -61,6 +61,11 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
         except Customer.DoesNotExist:
             return Response({"error": "Mijoz topilmadi"}, status=status.HTTP_404_NOT_FOUND)
 
+        # Automatically pause AI for this customer when human operator intervenes
+        if customer.ai_active:
+            customer.ai_active = False
+            customer.save(update_fields=["ai_active", "updated_at"])
+
         # Send actual outbound message to Telegram/Instagram
         from apps.chat.senders import send_reply
         chat_id = customer.platform_user_id
@@ -90,7 +95,59 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
             processing_status=ChatMessage.ProcessingStatus.COMPLETED
         )
 
-        return Response({"success": True, "message_id": str(msg.id)}, status=status.HTTP_201_CREATED)
+        return Response({"success": True, "ai_active": False, "message_id": str(msg.id)}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="send-voice")
+    def send_voice(self, request, pk=None):
+        """
+        Operator TWA Inbox'dan mijozga real Telegram/Instagram ovozli xabar yuborishi:
+        POST /api/v1/chat/<customer_id>/send-voice/
+        """
+        target_store = self._get_target_store()
+        audio_file = request.FILES.get("voice") or request.FILES.get("audio")
+
+        from apps.customers.models import Customer
+        try:
+            customer = Customer.objects.get(pk=pk, store=target_store)
+        except Customer.DoesNotExist:
+            return Response({"error": "Mijoz topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not audio_file:
+            return Response({"error": "Ovozli fayl yuklanmadi"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Automatically pause AI for this customer when human operator sends voice
+        if customer.ai_active:
+            customer.ai_active = False
+            customer.save(update_fields=["ai_active", "updated_at"])
+
+        voice_bytes = audio_file.read()
+        from apps.chat.senders import send_voice_reply
+
+        sent = send_voice_reply(
+            store=target_store,
+            platform=customer.platform,
+            chat_id=customer.platform_user_id,
+            voice_bytes=voice_bytes,
+            caption="🎙️ Ovozli xabar"
+        )
+
+        import uuid
+        msg = ChatMessage.objects.create(
+            store=target_store,
+            customer=customer,
+            message_id=f"op_voice_{uuid.uuid4().hex[:10]}",
+            platform=customer.platform,
+            role=ChatMessage.Role.ASSISTANT,
+            content="[VOICE] 🎙️ Ovozli xabar",
+            processing_status=ChatMessage.ProcessingStatus.COMPLETED
+        )
+
+        return Response({
+            "success": True,
+            "ai_active": False,
+            "sent_to_telegram": sent,
+            "message_id": str(msg.id)
+        }, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["patch"], url_path="toggle-ai")
     def toggle_ai(self, request, pk=None):
@@ -103,9 +160,93 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
             customer = Customer.objects.get(pk=pk, store=target_store)
             customer.ai_active = ai_active
             customer.save(update_fields=["ai_active", "updated_at"])
-            return Response({"success": True, "ai_active": ai_active}, status=status.HTTP_200_OK)
+            return Response({"success": True, "ai_active": customer.ai_active}, status=status.HTTP_200_OK)
         except Customer.DoesNotExist:
             return Response({"error": "Mijoz topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+    @action(detail=False, methods=["delete", "post"], url_path="messages/(?P<msg_id>[^/.]+)/delete")
+    def delete_single_message(self, request, msg_id=None):
+        """Bitta xabarni o'chirish: DELETE /api/v1/chat/messages/<msg_id>/delete/"""
+        target_store = self._get_target_store()
+        if not msg_id:
+            msg_id = request.data.get("msg_id")
+
+        if not msg_id:
+            return Response({"error": "O'chiriladigan xabar IDsi ko'rsatilmadi"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Match by PK (UUID), message_id or voice ID
+        updated_count = ChatMessage.objects.filter(
+            Q(id=msg_id) | Q(message_id=msg_id) | Q(message_id__icontains=msg_id),
+            store=target_store
+        ).update(is_deleted=True)
+
+        return Response({"success": True, "deleted_count": updated_count}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="messages/bulk-delete")
+    def bulk_delete_messages(self, request):
+        """Bir nechta xabarlarni tanlab o'chirish: POST /api/v1/chat/messages/bulk-delete/"""
+        target_store = self._get_target_store()
+        msg_ids = request.data.get("msg_ids", [])
+        if not msg_ids or not isinstance(msg_ids, list):
+            return Response({"error": "O'chiriladigan xabarlar ko'rsatilmadi"}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated_count = ChatMessage.objects.filter(
+            Q(id__in=msg_ids) | Q(message_id__in=msg_ids),
+            store=target_store
+        ).update(is_deleted=True)
+        return Response({"success": True, "deleted_count": updated_count}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="broadcast")
+    def send_broadcast(self, request):
+        """
+        Do'kon mijozlariga ommaviy reklama xabari yuborish:
+        POST /api/v1/chat/broadcast/
+        Telegram Rate Limit (25 msgs/sec) bilan Celery navbatiga qo'yiladi.
+        """
+        target_store = self._get_target_store()
+        title = request.data.get("title", "Ommaviy Reklama")
+        message_text = request.data.get("message_text", "").strip()
+
+        if not message_text:
+            return Response({"error": "Xabar matni kiritilmadi"}, status=status.HTTP_400_BAD_REQUEST)
+
+        from apps.customers.models import Customer
+        from apps.chat.models import BroadcastCampaign
+        from apps.chat.tasks import send_broadcast_message_task
+
+        active_customers = Customer.objects.filter(
+            store=target_store,
+            is_blocked=False,
+            is_deleted=False
+        )
+
+        total_count = active_customers.count()
+        if total_count == 0:
+            return Response({"error": "Xabar yuborish uchun faol mijozlar topilmadi"}, status=status.HTTP_400_BAD_REQUEST)
+
+        campaign = BroadcastCampaign.objects.create(
+            store=target_store,
+            title=title,
+            message_text=message_text,
+            status=BroadcastCampaign.Status.SENDING,
+            total_recipients=total_count
+        )
+
+        for customer in active_customers:
+            send_broadcast_message_task.delay(
+                campaign_id=str(campaign.id),
+                customer_id=str(customer.id),
+                platform=customer.platform,
+                chat_id=customer.platform_user_id,
+                message_text=message_text
+            )
+
+        return Response({
+            "success": True,
+            "campaign_id": str(campaign.id),
+            "total_recipients": total_count,
+            "rate_limit": "25 msgs/sec",
+            "status": "sending"
+        }, status=status.HTTP_201_CREATED)
 
 
 class ChatThreadListView(APIView):
@@ -127,6 +268,7 @@ class ChatThreadListView(APIView):
         "last_message_time": "14:30",
         "unread_count": 1,
         "ai_active": true,
+        "is_blocked": false,
         "messages": [
           {"id": "<msg_id>", "sender": "customer", "text": "...", "timestamp": "14:28"},
           {"id": "<msg_id>", "sender": "ai",       "text": "...", "timestamp": "14:30"}
@@ -178,6 +320,7 @@ class ChatThreadListView(APIView):
                     "last_message_time": "",
                     "unread_count": 0,
                     "ai_active": cust.ai_active,
+                    "is_blocked": cust.is_blocked,
                     "messages": [],
                 }
 

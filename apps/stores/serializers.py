@@ -29,6 +29,7 @@ class StoreSerializer(serializers.ModelSerializer):
             "description",
             "phone_number",
             "platform",
+            "category_type",
             "ai_active",
             "ai_system_prompt",
             "ai_model",
@@ -69,6 +70,7 @@ class StoreConfigUpdateSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "phone_number",
+            "category_type",
             "ai_active",
             "ai_system_prompt",
             "ai_model",
@@ -82,3 +84,105 @@ class StoreConfigUpdateSerializer(serializers.ModelSerializer):
             "tg_bot_token": {"write_only": True},
             "ig_access_token": {"write_only": True},
         }
+
+
+# ── METADATA VALIDATORLAR ────────────────────────────────────
+
+class ECommerceMetadataSerializer(serializers.Serializer):
+    sizes = serializers.ListField(child=serializers.CharField(), required=False)
+    colors = serializers.ListField(child=serializers.CharField(), required=False)
+    brand = serializers.CharField(required=False, allow_blank=True)
+    delivery_available = serializers.BooleanField(default=True)
+
+
+class EducationMetadataSerializer(serializers.Serializer):
+    duration_months = serializers.IntegerField(min_value=1, required=False)
+    lessons_per_week = serializers.IntegerField(min_value=1, required=False)
+    lesson_duration_minutes = serializers.IntegerField(default=90, required=False)
+    format = serializers.ChoiceField(choices=["online", "offline", "hybrid"], default="offline", required=False)
+    teacher_name = serializers.CharField(required=False, allow_blank=True)
+    trial_lesson_days = serializers.ListField(child=serializers.CharField(), required=False)
+
+
+class ServicesMetadataSerializer(serializers.Serializer):
+    duration_minutes = serializers.IntegerField(min_value=1, required=False)
+    specialists = serializers.ListField(child=serializers.CharField(), required=False)
+    available_hours = serializers.ListField(child=serializers.CharField(), required=False)
+    location = serializers.CharField(required=False, allow_blank=True)
+
+
+class OnboardingItemSerializer(serializers.Serializer):
+    """Onboarding jarayonida keladigan mahsulot/kurs/xizmat modeli"""
+    name = serializers.CharField(max_length=255)
+    description = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    price = serializers.DecimalField(max_digits=12, decimal_places=2, default=0)
+    stock = serializers.IntegerField(default=0)
+    category = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    metadata = serializers.JSONField(default=dict, required=False)
+
+
+class StoreOnboardingSerializer(serializers.ModelSerializer):
+    """
+    TWA Onboarding jarayoni uchun serializer.
+    Merchant profilini to'ldiradi va birinchi mahsulot/xizmatlarini yaratadi.
+    """
+    items = OnboardingItemSerializer(many=True, required=False, write_only=True)
+
+    class Meta:
+        model = Store
+        fields = [
+            "name",
+            "description",
+            "phone_number",
+            "category_type",
+            "tg_bot_token",
+            "items"
+        ]
+
+    def validate(self, attrs):
+        category_type = attrs.get("category_type") or getattr(self.instance, "category_type", Store.CategoryType.E_COMMERCE)
+        items = attrs.get("items", [])
+
+        for idx, item in enumerate(items):
+            meta_data = item.get("metadata", {})
+            
+            if category_type == Store.CategoryType.E_COMMERCE:
+                serializer = ECommerceMetadataSerializer(data=meta_data)
+            elif category_type == Store.CategoryType.EDUCATION:
+                serializer = EducationMetadataSerializer(data=meta_data)
+            elif category_type == Store.CategoryType.SERVICES:
+                serializer = ServicesMetadataSerializer(data=meta_data)
+            else:
+                raise serializers.ValidationError({"category_type": "Noma'lum biznes kategoriyasi."})
+
+            if not serializer.is_valid():
+                raise serializers.ValidationError({
+                    f"items[{idx}].metadata": serializer.errors
+                })
+
+        return attrs
+
+    def update(self, instance, validated_data):
+        from django.db import transaction
+        from apps.products.models import Product
+
+        items_data = validated_data.pop("items", None)
+
+        with transaction.atomic():
+            instance = super().update(instance, validated_data)
+
+            if items_data is not None:
+                Product.objects.filter(store=instance).delete()
+                for item in items_data:
+                    Product.objects.create(
+                        store=instance,
+                        name=item["name"],
+                        description=item.get("description", ""),
+                        price=item.get("price", 0),
+                        stock=item.get("stock", 0),
+                        category=item.get("category", ""),
+                        metadata=item.get("metadata", {})
+                    )
+
+        return instance
+
