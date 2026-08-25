@@ -75,6 +75,10 @@ class Customer(BaseModel):
         null=True,
         help_text="Oxirgi xabar vaqti"
     )
+    ai_active = models.BooleanField(
+        default=True,
+        help_text="Ushbu mijoz uchun AI bot faolmi? False bo'lsa operator qo'lda javob beradi"
+    )
 
     class Meta:
         verbose_name = "Mijoz"

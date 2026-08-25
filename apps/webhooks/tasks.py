@@ -108,33 +108,80 @@ def process_incoming_message(
             )
             return
 
-        # ── 4. Slash buyruqlarni (/start, /dashboard, /help) maxsus qayta ishlash ──
+        # ── 4. Admin (Do'kon Egasi) vs Mijozni tekshirish va ajratish ──────
+        is_admin = False
+        if store.tg_owner_chat_id and str(store.tg_owner_chat_id) == str(sender_id):
+            is_admin = True
+        elif hasattr(store.owner, 'telegram_user_id') and str(getattr(store.owner, 'telegram_user_id', '')) == str(sender_id):
+            is_admin = True
+
         cmd_text = text.strip().lower()
+
+        # Deep-link or admin bind command (/start admin_<store_slug> or /start admin)
+        if "admin" in cmd_text:
+            # Xavfsizlik tekshiruvi: Agar do'kon egasi allaqachon mavjud bo'lsa va bu boshqa Telegram odam bo'lsa -> BLOKLAYMIZ!
+            if store.tg_owner_chat_id and str(store.tg_owner_chat_id) != str(sender_id):
+                logger.warning(f"[Security] Begona foydalanuvchi ({sender_id}) do'kon egasi havolasini ishlatishga urindi: store={store.name}")
+                from apps.chat.senders import send_telegram_message
+                send_telegram_message(
+                    bot_token=store.tg_bot_token,
+                    chat_id=chat_id,
+                    text="🚫 <b>Xavfsizlik ogohlantirishi:</b> Ushbu do'kon allaqachon o'z egasiga biriktirilgan! Siz ushbu do'kon paneliga kira olmaysiz.",
+                    parse_mode="HTML",
+                )
+                ChatMessage.objects.filter(id=chat_message.id).update(
+                    processing_status=ChatMessage.ProcessingStatus.COMPLETED
+                )
+                return
+
+            # Birinchi marta kirish — egasi deb saqlaymiz!
+            store.tg_owner_chat_id = str(sender_id)
+            store.save(update_fields=["tg_owner_chat_id"])
+            is_admin = True
+            logger.info(f"[Task] Yangi do'kon egasi muvaffaqiyatli biriktirildi: store={store.name}, owner_tg_id={sender_id}")
+
         if cmd_text.startswith("/start") or cmd_text.startswith("/dashboard") or cmd_text in ["start", "dashboard"]:
-            logger.info(f"[Task] /start buyrug'i keldi -> AI'ga borolmaydi, bevosita Ilovaga Kirish tugmasi yuborilmoqda")
-            welcome_text = (
-                f"<b>Assalomu alaykum! {store.name} botiga xush kelibsiz! 😊</b>\n\n"
-                f"Ilovani ochish va do'kon paneliga kirish uchun pastdagi tugmani bosing 👇"
-            )
-            twa_url = f"https://granddad-upstage-reflector.ngrok-free.dev/app/"
-            reply_markup = {
-                "inline_keyboard": [
-                    [
-                        {
-                            "text": "🚀 Ilovaga kirish",
-                            "web_app": {"url": twa_url}
-                        }
-                    ]
-                ]
-            }
             from apps.chat.senders import send_telegram_message
-            send_telegram_message(
-                bot_token=store.tg_bot_token,
-                chat_id=chat_id,
-                text=welcome_text,
-                parse_mode="HTML",
-                reply_markup=reply_markup,
-            )
+
+            if is_admin:
+                logger.info(f"[Task] Admin /start keldi -> Dashboard TWA tugmasi yuborilmoqda")
+                welcome_text = (
+                    f"<b>Assalomu alaykum, Xurmatli {store.name} Do'kon Egasi! 👑</b>\n\n"
+                    f"Boshqaruv paneli orqali kelgan buyurtmalarni ko'rish, katalogingizni boshqarish hamda "
+                    f"AI bot yo'riqnomalarini sozlash uchun pastdagi tugmani bosing 👇"
+                )
+                twa_url = "http://localhost:3000"
+                reply_markup = {
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "📊 Boshqaruv Paneli (Admin TWA)",
+                                "web_app": {"url": twa_url}
+                            }
+                        ]
+                    ]
+                }
+                send_telegram_message(
+                    bot_token=store.tg_bot_token,
+                    chat_id=chat_id,
+                    text=welcome_text,
+                    parse_mode="HTML",
+                    reply_markup=reply_markup,
+                )
+            else:
+                logger.info(f"[Task] Mijoz /start keldi -> TWA tugmasiz do'rtona qutlov yuborilmoqda")
+                customer_text = (
+                    f"<b>Assalomu alaykum! {store.name} rasmiy sotuv botiga xush kelibsiz! 😊</b>\n\n"
+                    f"Katalogimizdagi mahsulotlar, razmerlar, narxlar va yetkazib berish bo'yicha savolingiz bo'lsa, "
+                    f"shunchaki xabaringizni yozing. AI sotuvchimiz yordam beradi."
+                )
+                send_telegram_message(
+                    bot_token=store.tg_bot_token,
+                    chat_id=chat_id,
+                    text=customer_text,
+                    parse_mode="HTML",
+                )
+
             ChatMessage.objects.filter(id=chat_message.id).update(
                 processing_status=ChatMessage.ProcessingStatus.COMPLETED
             )
@@ -155,6 +202,20 @@ def process_incoming_message(
                 text=help_text,
                 parse_mode="HTML",
             )
+            ChatMessage.objects.filter(id=chat_message.id).update(
+                processing_status=ChatMessage.ProcessingStatus.COMPLETED
+            )
+            return
+
+        # ── 4.5. AI bot faolligini tekshirish (Global yoki Handoff) ─────
+        if not store.ai_active or not getattr(customer, "ai_active", True):
+            logger.info(
+                f"[Task] AI bot nofaol (handoff holati) | store={store.name} | "
+                f"customer={customer.full_name or customer.username or customer.platform_user_id} | "
+                f"store_ai_active={store.ai_active} | "
+                f"customer_ai_active={getattr(customer, 'ai_active', True)}"
+            )
+            # Dastlabki xabarni COMPLETED deb belgilaymiz va javob qaytarmaymiz
             ChatMessage.objects.filter(id=chat_message.id).update(
                 processing_status=ChatMessage.ProcessingStatus.COMPLETED
             )

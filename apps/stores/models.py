@@ -40,6 +40,17 @@ class Store(BaseModel):
         max_length=255,
         help_text="Do'kon nomi (masalan: 'Zulfiya Fashion')"
     )
+    description = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Do'kon tavsifi (frontend va AI uchun)"
+    )
+    phone_number = models.CharField(
+        max_length=30,
+        blank=True,
+        null=True,
+        help_text="Operator telefon raqami (frontend Sozlamalar bo'limida ko'rsatiladi)"
+    )
     platform = models.CharField(
         max_length=20,
         choices=Platform.choices,
@@ -86,6 +97,10 @@ class Store(BaseModel):
     )
 
     # ── AI sozlamalari ─────────────────────────────────────────
+    ai_active = models.BooleanField(
+        default=True,
+        help_text="AI bot faolmi? False bo'lsa operator qo'lda javob beradi"
+    )
     ai_system_prompt = models.TextField(
         default=(
             "Siz onlayn do'konning yordamchi botisiz. "
@@ -97,8 +112,8 @@ class Store(BaseModel):
     )
     ai_model = models.CharField(
         max_length=50,
-        default="gemini-3.6-flash",
-        help_text="Qaysi AI modeli ishlatilsin (gemini-3.6-flash va h.k.)"
+        default="gemini-2.5-flash",
+        help_text="Qaysi AI modeli ishlatilsin (gemini-2.5-flash va h.k.)"
     )
     ai_temperature = models.FloatField(
         default=0.7,

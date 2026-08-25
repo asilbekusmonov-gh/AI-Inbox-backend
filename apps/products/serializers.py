@@ -1,15 +1,19 @@
 """
 Product Serializers — DRF.
-Multi-tenant: `store` har doim request.user.store dan olinadi.
+Robust Image URL handling with fallback metadata parsing.
 """
 from rest_framework import serializers
 from .models import Product
+import re
 
 
 class ProductSerializer(serializers.ModelSerializer):
     """
     Mahsulotlarni ko'rish va boshqarish serializeri.
+    `image_url` qiymati description tarkibidagi [IMG: ...] tegidan va default qiymatdan avtomatik o'qiladi.
     """
+    image_url = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
     class Meta:
         model = Product
         fields = [
@@ -20,8 +24,33 @@ class ProductSerializer(serializers.ModelSerializer):
             "stock",
             "sku",
             "category",
+            "image_url",
             "is_active",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        desc = instance.description or ""
+
+        # Extract image URL from [IMG: ...] tag if present in description
+        img_match = re.search(r"\[IMG:\s*(https?://[^\s\]]+|data:image/[^\s\]]+)\]", desc)
+        if img_match:
+            ret["image_url"] = img_match.group(1)
+            # Clean description for display
+            ret["description"] = re.sub(r"\[IMG:\s*(https?://[^\s\]]+|data:image/[^\s\]]+)\]\s*", "", desc).strip()
+        else:
+            ret["image_url"] = "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&auto=format&fit=crop&q=60"
+
+        return ret
+
+    def create(self, validated_data):
+        img_url = validated_data.pop("image_url", None)
+        desc = validated_data.get("description", "") or ""
+
+        if img_url and str(img_url).strip():
+            validated_data["description"] = f"[IMG: {str(img_url).strip()}]\n{desc}".strip()
+
+        return Product.objects.create(**validated_data)

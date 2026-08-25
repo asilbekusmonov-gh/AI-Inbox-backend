@@ -20,6 +20,7 @@ class CustomerSerializer(serializers.ModelSerializer):
             "username",
             "total_orders",
             "last_message_at",
+            "ai_active",
             "created_at",
         ]
         read_only_fields = ["id", "platform", "platform_user_id", "created_at"]

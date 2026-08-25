@@ -6,10 +6,11 @@ B2B SaaS — Multi-tenant arxitektura
 from pathlib import Path
 import os
 from django.core.exceptions import ImproperlyConfigured
-from dotenv import load_dotenv
-
-# .env faylini avtomatik yuklaydi
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # ─────────────────────────────────────────────
 # BASE
@@ -200,8 +201,8 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "100/hour",
-        "user": "1000/hour",
+        "anon": "10000/hour",
+        "user": "10000/hour",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "EXCEPTION_HANDLER": "apps.core.exceptions.custom_exception_handler",
@@ -235,12 +236,13 @@ SIMPLE_JWT = {
 # ─────────────────────────────────────────────
 # CORS
 # ─────────────────────────────────────────────
-CORS_ALLOWED_ORIGINS = env(
-    "CORS_ALLOWED_ORIGINS",
-    default="http://localhost:3000"
-).split(",")
+from corsheaders.defaults import default_headers
 
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "x-telegram-init-data",
+]
 
 
 # ─────────────────────────────────────────────
