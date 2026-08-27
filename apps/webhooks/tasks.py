@@ -18,6 +18,7 @@ SaaS qoidalari:
 import logging
 from celery import shared_task
 from celery.exceptions import MaxRetriesExceededError, SoftTimeLimitExceeded
+from django.conf import settings
 
 logger = logging.getLogger("apps.webhooks")
 
@@ -110,35 +111,37 @@ def process_incoming_message(
 
         # ── 4. Admin (Do'kon Egasi) vs Mijozni tekshirish va ajratish ──────
         is_admin = False
-        if store.tg_owner_chat_id and str(store.tg_owner_chat_id) == str(sender_id):
-            is_admin = True
-        elif hasattr(store.owner, 'telegram_user_id') and str(getattr(store.owner, 'telegram_user_id', '')) == str(sender_id):
-            is_admin = True
-
         cmd_text = text.strip().lower()
 
-        # Deep-link or admin bind command (/start admin_<store_slug> or /start admin)
-        if "admin" in cmd_text:
-            # Xavfsizlik tekshiruvi: Agar do'kon egasi allaqachon mavjud bo'lsa va bu boshqa Telegram odam bo'lsa -> BLOKLAYMIZ!
-            if store.tg_owner_chat_id and str(store.tg_owner_chat_id) != str(sender_id):
-                logger.warning(f"[Security] Begona foydalanuvchi ({sender_id}) do'kon egasi havolasini ishlatishga urindi: store={store.name}")
-                from apps.chat.senders import send_telegram_message
-                send_telegram_message(
-                    bot_token=store.tg_bot_token,
-                    chat_id=chat_id,
-                    text="🚫 <b>Xavfsizlik ogohlantirishi:</b> Ushbu do'kon allaqachon o'z egasiga biriktirilgan! Siz ushbu do'kon paneliga kira olmaysiz.",
-                    parse_mode="HTML",
-                )
-                ChatMessage.objects.filter(id=chat_message.id).update(
-                    processing_status=ChatMessage.ProcessingStatus.COMPLETED
-                )
-                return
-
-            # Birinchi marta kirish — egasi deb saqlaymiz!
-            store.tg_owner_chat_id = str(sender_id)
-            store.save(update_fields=["tg_owner_chat_id"])
+        # Do'kon egasi ID allaqachon biriktirilgan va xuddi o'sha odam yozayapti → admin
+        if store.tg_owner_chat_id and str(store.tg_owner_chat_id) == str(sender_id):
             is_admin = True
-            logger.info(f"[Task] Yangi do'kon egasi muvaffaqiyatli biriktirildi: store={store.name}, owner_tg_id={sender_id}")
+
+        # admin_ deep-link: /start admin_<store_uuid> — yangi egani biriktirish
+        elif cmd_text.startswith("/start"):
+            parts = text.strip().split()
+            if len(parts) > 1 and parts[1].startswith("admin_"):
+                if store.tg_owner_chat_id:
+                    # Boshqa egaga biriktirilgan — bloklash
+                    logger.warning(f"[Security] Begona foydalanuvchi ({sender_id}) admin havolasini ishlatishga urindi: store={store.name}")
+                    from apps.chat.senders import send_telegram_message
+                    send_telegram_message(
+                        bot_token=store.tg_bot_token,
+                        chat_id=chat_id,
+                        text="🚫 <b>Xavfsizlik ogohlantirishi:</b> Ushbu do'kon allaqachon o'z egasiga biriktirilgan! Siz ushbu do'kon paneliga kira olmaysiz.",
+                        parse_mode="HTML",
+                    )
+                    ChatMessage.objects.filter(id=chat_message.id).update(
+                        processing_status=ChatMessage.ProcessingStatus.COMPLETED
+                    )
+                    return
+                else:
+                    # Birinchi marta — egani biriktir
+                    store.tg_owner_chat_id = str(sender_id)
+                    store.save(update_fields=["tg_owner_chat_id"])
+                    logger.info(f"[Task] Do'kon egasi biriktirildi: store={store.name}, owner_tg_id={sender_id}")
+                    is_admin = True
+
 
         if cmd_text.startswith("/start") or cmd_text.startswith("/dashboard") or cmd_text in ["start", "dashboard"]:
             from apps.chat.senders import send_telegram_message
@@ -150,17 +153,22 @@ def process_incoming_message(
                     f"Boshqaruv paneli orqali kelgan buyurtmalarni ko'rish, katalogingizni boshqarish hamda "
                     f"AI bot yo'riqnomalarini sozlash uchun pastdagi tugmani bosing 👇"
                 )
-                twa_url = "http://localhost:3000"
+                # TWA URL: PUBLIC_URL .env dan olinadi (ngrok yoki production domain)
+                public_url = getattr(settings, "PUBLIC_URL", "").rstrip("/")
+                if not public_url:
+                    public_url = "https://granddad-upstage-reflector.ngrok-free.dev"
+                twa_url = f"{public_url}/app/"
                 reply_markup = {
                     "inline_keyboard": [
                         [
                             {
-                                "text": "📊 Boshqaruv Paneli (Admin TWA)",
+                                "text": "📊 Boshqaruv Paneli",
                                 "web_app": {"url": twa_url}
                             }
                         ]
                     ]
                 }
+                logger.info(f"[Task] TWA URL: {twa_url}")
                 send_telegram_message(
                     bot_token=store.tg_bot_token,
                     chat_id=chat_id,
@@ -207,7 +215,61 @@ def process_incoming_message(
             )
             return
 
-        # ── 4.5. AI bot faolligini tekshirish (Global yoki Handoff) ─────
+        # ── 4.5. Media Persistence (Rasm/Audio Saqlash Pipeline) ────────
+        # Webhook payload'da media url bo'lsa fonda saqlash taskini chaqiramiz
+        if raw_payload and isinstance(raw_payload, dict):
+            attachments = raw_payload.get("message", {}).get("attachments", [])
+            if attachments or raw_payload.get("media_url"):
+                try:
+                    download_and_store_chat_media.delay(str(chat_message.id))
+                except Exception as e:
+                    logger.warning(f"Media download task chaqirishda xato: {e}")
+
+        # ── 4.6. Operator Handoff Trigger (Mijoz Insoniy Operator So'raganda) ─
+        HANDOFF_KEYWORDS = ["operator", "odam bilan", "insonga", "call center", "menejer", "human"]
+        is_handoff_requested = any(kw in cmd_text for kw in HANDOFF_KEYWORDS)
+
+        if is_handoff_requested:
+            logger.info(f"[Task] Mijoz operator so'radi! Handoff rejimiga o'tilmoqda: customer={customer}")
+            customer.ai_active = False
+            customer.save(update_fields=["ai_active"])
+
+            # Egasiga Telegram xabarnomasi yuboramiz
+            if store.tg_owner_chat_id:
+                from apps.chat.senders import send_telegram_message
+                twa_url = "http://localhost:3000"
+                owner_alert = (
+                    f"🚨 <b>OPERATOR ARALASHUVI KERAK!</b>\n\n"
+                    f" do'koni: <b>{store.name}</b>\n"
+                    f"👤 Mijoz: <b>{customer.full_name or customer.username or customer.platform_user_id}</b>\n"
+                    f"📲 Platforma: <b>{platform.upper()}</b>\n"
+                    f"💬 Xabar: <i>\"{text}\"</i>\n\n"
+                    f"<i>AI bot vaqtincha to'xtatildi. Operator javob berishi kutilmoqda.</i>"
+                )
+                reply_markup = {
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "💬 Chatni Ochish (Dashboard)",
+                                "web_app": {"url": twa_url}
+                            }
+                        ]
+                    ]
+                }
+                send_telegram_message(
+                    bot_token=store.tg_bot_token,
+                    chat_id=store.tg_owner_chat_id,
+                    text=owner_alert,
+                    parse_mode="HTML",
+                    reply_markup=reply_markup,
+                )
+
+            ChatMessage.objects.filter(id=chat_message.id).update(
+                processing_status=ChatMessage.ProcessingStatus.COMPLETED
+            )
+            return
+
+        # ── 4.7. AI bot faolligini tekshirish (Global yoki Handoff) ─────
         if not store.ai_active or not getattr(customer, "ai_active", True):
             logger.info(
                 f"[Task] AI bot nofaol (handoff holati) | store={store.name} | "
@@ -422,3 +484,63 @@ def _update_retry_count(store_id, message_id, platform, retry_count, error):
         )
     except Exception as e:
         logger.error(f"_update_retry_count xatosi: {e}")
+
+
+# ─────────────────────────────────────────────────────────────
+# MEDIA PERSISTENCE TASK — Media fayllarni serverga saqlash
+# ─────────────────────────────────────────────────────────────
+
+@shared_task(
+    name="apps.webhooks.tasks.download_and_store_chat_media",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=10,
+    ignore_result=True,
+)
+def download_and_store_chat_media(self, chat_message_id: str):
+    """
+    Instagram/Telegram birikmalarining media havolalarini (Meta CDN) yuklab olib,
+    mahalliy storage'ga saqlaydi va ChatMessage.media_url maydonini yangilaydi.
+    """
+    from apps.chat.models import ChatMessage
+    from apps.chat.services import download_and_save_media_file
+
+    try:
+        msg = ChatMessage.objects.filter(id=chat_message_id).first()
+        if not msg:
+            logger.warning(f"[Media Task] Xabar topilmadi: {chat_message_id}")
+            return
+
+        media_url = None
+        media_type = "image"
+
+        # Raw payload'dan attachment URL'ni olamiz
+        if msg.raw_payload and isinstance(msg.raw_payload, dict):
+            attachments = msg.raw_payload.get("message", {}).get("attachments", [])
+            if attachments:
+                att = attachments[0]
+                media_type = att.get("type", "image")
+                media_url = att.get("payload", {}).get("url")
+
+        if not media_url and msg.content and msg.content.startswith("http"):
+            media_url = msg.content
+
+        if not media_url:
+            logger.debug(f"[Media Task] Media URL topilmadi, skip: msg_id={chat_message_id}")
+            return
+
+        # Faylni yuklab olamiz
+        saved_url = download_and_save_media_file(media_url=media_url, media_type=media_type)
+        if saved_url:
+            msg.media_url = saved_url
+            msg.save(update_fields=["media_url"])
+            logger.info(
+                f"[Media Task] Muvaffaqiyatli saqlandi va ChatMessage.media_url yangilandi: "
+                f"msg_id={chat_message_id} | url={saved_url}"
+            )
+    except Exception as e:
+        logger.error(
+            f"[Media Task] Media saqlashda xato: msg_id={chat_message_id} | {e}",
+            exc_info=True,
+        )
+

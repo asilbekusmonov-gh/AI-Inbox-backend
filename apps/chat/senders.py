@@ -6,12 +6,15 @@ Har bir sender:
 - Tarmoq uzilishida retry qiladi
 - Uzoq xabarlarni bo'lib yuboradi
 """
+import json
 import logging
 import time
+from datetime import timedelta
 from typing import Optional
 
 import httpx
 from django.conf import settings
+from django.utils import timezone
 
 logger = logging.getLogger("apps.chat")
 
@@ -174,21 +177,6 @@ def send_telegram_voice(
         return False
 
 
-def send_voice_reply(
-    store,
-    platform: str,
-    chat_id: str,
-    voice_bytes: bytes,
-    caption: str = "",
-) -> bool:
-    """
-    Platformaga mos ravishda ovozli xabarni foydalanuvchiga yetkazadi.
-    """
-    bot_token = store.tg_bot_token or getattr(settings, "TELEGRAM_BOT_TOKEN", "")
-    if platform.lower() == "telegram":
-        return send_telegram_voice(bot_token, chat_id, voice_bytes, caption)
-    return False
-
 
 def send_telegram_order_notification(
     bot_token: str,
@@ -249,129 +237,22 @@ def _format_order_notification(order) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
-# INSTAGRAM SENDER
+# INSTAGRAM SENDER (24-hour window bilan yangi versiyalar pastda)
 # ─────────────────────────────────────────────────────────────
 
-def send_instagram_message(
-    access_token: str,
-    recipient_id: str,
-    text: str,
-) -> bool:
-    """
-    Instagram Messaging API orqali xabar yuboradi.
-
-    Meta Graph API: POST /me/messages
-
-    Args:
-        access_token: Do'konning Instagram long-lived access token
-        recipient_id: Mijozning Instagram ID (IGSID)
-        text: Xabar matni
-
-    Returns:
-        True — muvaffaqiyatli
-        False — xato
-    """
-    if not access_token or not recipient_id or not text:
-        logger.warning(
-            f"Instagram: bo'sh parametr | "
-            f"recipient={recipient_id!r}"
-        )
-        return False
-
-    # Uzoq xabarlarni bo'lib yuboramiz
-    chunks = _split_text(text, INSTAGRAM_MAX_LENGTH)
-
-    all_success = True
-    for i, chunk in enumerate(chunks):
-        success = _send_instagram_chunk(
-            access_token=access_token,
-            recipient_id=recipient_id,
-            text=chunk,
-        )
-        if not success:
-            all_success = False
-        if i < len(chunks) - 1:
-            time.sleep(0.5)
-
-    return all_success
-
-
-def _send_instagram_chunk(
-    access_token: str,
-    recipient_id: str,
-    text: str,
-    max_retries: int = 3,
-) -> bool:
-    """Bitta Instagram xabar bo'lagini yuboradi"""
-    url = "https://graph.facebook.com/v18.0/me/messages"
-    payload = {
-        "recipient": {"id": recipient_id},
-        "message": {"text": text},
-        "messaging_type": "RESPONSE",
-        "access_token": access_token,
-    }
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            with httpx.Client(timeout=15.0) as client:
-                response = client.post(url, json=payload)
-
-            data = response.json()
-
-            if response.status_code == 200 and "message_id" in data:
-                return True
-
-            # Token eskirgan
-            if response.status_code == 400:
-                error = data.get("error", {})
-                error_code = error.get("code", 0)
-                if error_code in (190, 102):
-                    logger.error(
-                        f"Instagram: access token eskirgan! "
-                        f"Do'kon egasi token yangilashi kerak."
-                    )
-                    return False  # Retry foydasi yo'q
-
-            # Rate limit
-            if response.status_code == 429:
-                logger.warning("Instagram rate limit! 30s kutilmoqda...")
-                time.sleep(30)
-                continue
-
-            logger.error(
-                f"Instagram API xatosi: {response.status_code} | {data}"
-            )
-
-            if attempt < max_retries:
-                time.sleep(2 ** attempt)
-
-        except httpx.TimeoutException:
-            logger.warning(
-                f"Instagram timeout (urinish {attempt}/{max_retries})"
-            )
-            if attempt < max_retries:
-                time.sleep(2 ** attempt)
-
-        except httpx.RequestError as e:
-            logger.error(
-                f"Instagram so'rov xatosi: {e}",
-                exc_info=True,
-            )
-            if attempt < max_retries:
-                time.sleep(2 ** attempt)
-
-        except Exception as e:
-            logger.error(f"Instagram kutilmagan xato: {e}", exc_info=True)
-            return False
-
-    return False
 
 
 # ─────────────────────────────────────────────────────────────
 # UNIVERSAL SENDER
 # ─────────────────────────────────────────────────────────────
 
-def send_reply(store, platform: str, chat_id: str, text: str) -> bool:
+def send_reply(
+    store,
+    platform: str,
+    chat_id: str,
+    text: str,
+    customer=None,
+) -> bool:
     """
     Platforma turini avtomatik aniqlaydi va javob yuboradi.
 
@@ -380,6 +261,7 @@ def send_reply(store, platform: str, chat_id: str, text: str) -> bool:
         platform: "telegram" | "instagram"
         chat_id: Javob yuboriladigan chat/user ID
         text: Yuborilinadigan matn
+        customer: Customer obyekti (ixtiyoriy — Instagram 24h window uchun)
 
     Returns:
         True — yuborildi
@@ -408,10 +290,15 @@ def send_reply(store, platform: str, chat_id: str, text: str) -> bool:
                     f"Instagram token yo'q: store={store.name}"
                 )
                 return False
+
+            # Meta 24-Hour Messaging Window tekshiruvi
+            within_24h = _check_24h_window(customer)
+
             return send_instagram_message(
                 access_token=store.ig_access_token,
                 recipient_id=chat_id,
                 text=text,
+                within_24h_window=within_24h,
             )
 
         else:
@@ -458,3 +345,410 @@ def _split_text(text: str, max_length: int) -> list[str]:
         text = text[split_pos:].strip()
 
     return [c for c in chunks if c]
+
+
+# ─────────────────────────────────────────────────────────────
+# INSTAGRAM — 24-HOUR MESSAGING WINDOW (META POLICY)
+# ─────────────────────────────────────────────────────────────
+
+def _check_24h_window(customer=None) -> bool:
+    """
+    Meta Instagram Messaging Policy tekshiruvi.
+
+    Instagram faqat mijoz yozganidan keyin 24 soat ichida
+    'RESPONSE' messaging_type bilan javob yuborishga ruxsat beradi.
+    24 soatdan keyin 'MESSAGE_TAG' + 'HUMAN_AGENT' tegi ishlatilishi kerak.
+
+    Args:
+        customer: Customer obyekti (last_message_at tekshiruv uchun)
+
+    Returns:
+        True  — 24 soat ichida (RESPONSE ishlatish mumkin)
+        False — 24 soatdan o'tgan (MESSAGE_TAG kerak)
+    """
+    if customer is None:
+        # Customer ma'lumoti yo'q — ehtiyot bo'lib RESPONSE ishlatamiz
+        return True
+
+    last_msg_at = getattr(customer, "last_message_at", None)
+    if not last_msg_at:
+        # Mijozdan hech qachon xabar kelmagan — ehtiyot bo'lib RESPONSE
+        return True
+
+    elapsed = timezone.now() - last_msg_at
+    within_window = elapsed <= timedelta(hours=24)
+
+    if not within_window:
+        logger.info(
+            f"[24h Window] O'tgan: customer={customer.platform_user_id} | "
+            f"oxirgi xabar={last_msg_at} | "
+            f"o'tgan vaqt={elapsed}"
+        )
+
+    return within_window
+
+
+# ─────────────────────────────────────────────────────────────
+# INSTAGRAM — MEDIA ATTACHMENT SENDER
+# ─────────────────────────────────────────────────────────────
+
+def send_instagram_media(
+    access_token: str,
+    recipient_id: str,
+    media_url: str,
+    media_type: str = "image",
+    caption: str = "",
+    within_24h_window: bool = True,
+) -> bool:
+    """
+    Instagram DM orqali media fayl (rasm, video) yuboradi.
+
+    Meta Graph API: POST /me/messages
+    Format:
+      {
+        "recipient": {"id": IGSID},
+        "message": {
+          "attachment": {
+            "type": "image",
+            "payload": {"url": "https://...", "is_reusable": true}
+          }
+        }
+      }
+
+    Args:
+        access_token: Do'konning ig_access_token
+        recipient_id: Mijozning IGSID
+        media_url: Media faylining public URL
+        media_type: "image" | "video" | "audio" | "file"
+        caption: Rasm ostidagi izoh (ixtiyoriy, text sifatida alohida yuboriladi)
+        within_24h_window: 24 soatlik oynada ekanligini bildiradi
+
+    Returns:
+        True — muvaffaqiyatli
+        False — xato
+    """
+    if not access_token or not recipient_id or not media_url:
+        logger.warning(
+            f"[IG Media] Bo'sh parametr | recipient={recipient_id!r}"
+        )
+        return False
+
+    url = "https://graph.facebook.com/v18.0/me/messages"
+
+    # 24 soatlik oynaga qarab messaging_type tanlash
+    if within_24h_window:
+        messaging_type = "RESPONSE"
+        tag_field = {}
+    else:
+        messaging_type = "MESSAGE_TAG"
+        tag_field = {"tag": "HUMAN_AGENT"}
+
+    payload = {
+        "recipient": {"id": recipient_id},
+        "message": {
+            "attachment": {
+                "type": media_type,
+                "payload": {
+                    "url": media_url,
+                    "is_reusable": True,
+                },
+            }
+        },
+        "messaging_type": messaging_type,
+        "access_token": access_token,
+        **tag_field,
+    }
+
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                response = client.post(url, json=payload)
+
+            data = response.json()
+
+            if response.status_code == 200 and "message_id" in data:
+                logger.info(
+                    f"[IG Media] Yuborildi: recipient={recipient_id} | "
+                    f"type={media_type}"
+                )
+                # Caption bo'lsa — alohida text xabar sifatida yuboramiz
+                if caption:
+                    send_instagram_message(
+                        access_token=access_token,
+                        recipient_id=recipient_id,
+                        text=caption,
+                        within_24h_window=within_24h_window,
+                    )
+                return True
+
+            error = data.get("error", {})
+            error_code = error.get("code", 0)
+
+            # Token eskirgan
+            if error_code in (190, 102):
+                logger.error(
+                    f"[IG Media] Token eskirgan! code={error_code}"
+                )
+                return False
+
+            # Rate limit
+            if response.status_code == 429:
+                logger.warning("[IG Media] Rate limit! 30s kutilmoqda...")
+                time.sleep(30)
+                continue
+
+            logger.error(
+                f"[IG Media] API xatosi: "
+                f"status={response.status_code} | {data}"
+            )
+
+            if attempt < max_retries:
+                time.sleep(2 ** attempt)
+
+        except httpx.TimeoutException:
+            logger.warning(f"[IG Media] Timeout (urinish {attempt})")
+            if attempt < max_retries:
+                time.sleep(2 ** attempt)
+        except Exception as e:
+            logger.error(f"[IG Media] Kutilmagan xato: {e}", exc_info=True)
+            return False
+
+    return False
+
+
+# ─────────────────────────────────────────────────────────────
+# INSTAGRAM — send_instagram_message 24h YANGILASH
+# ─────────────────────────────────────────────────────────────
+
+def send_instagram_message(
+    access_token: str,
+    recipient_id: str,
+    text: str,
+    within_24h_window: bool = True,
+) -> bool:
+    """
+    Instagram Messaging API orqali xabar yuboradi.
+    (24-Hour Window Policy bilan yangilangan versiya)
+
+    Meta Graph API: POST /me/messages
+
+    Args:
+        access_token: Do'konning Instagram long-lived access token
+        recipient_id: Mijozning Instagram ID (IGSID)
+        text: Xabar matni
+        within_24h_window: True — RESPONSE, False — MESSAGE_TAG + HUMAN_AGENT
+
+    Returns:
+        True — muvaffaqiyatli
+        False — xato
+    """
+    if not access_token or not recipient_id or not text:
+        logger.warning(
+            f"Instagram: bo'sh parametr | "
+            f"recipient={recipient_id!r}"
+        )
+        return False
+
+    # Uzoq xabarlarni bo'lib yuboramiz
+    chunks = _split_text(text, INSTAGRAM_MAX_LENGTH)
+
+    all_success = True
+    for i, chunk in enumerate(chunks):
+        success = _send_instagram_chunk(
+            access_token=access_token,
+            recipient_id=recipient_id,
+            text=chunk,
+            within_24h_window=within_24h_window,
+        )
+        if not success:
+            all_success = False
+        if i < len(chunks) - 1:
+            time.sleep(0.5)
+
+    return all_success
+
+
+def _send_instagram_chunk(
+    access_token: str,
+    recipient_id: str,
+    text: str,
+    max_retries: int = 3,
+    within_24h_window: bool = True,
+) -> bool:
+    """
+    Bitta Instagram xabar bo'lagini yuboradi.
+    24-Hour Window Policy'ga mos messaging_type tanlaydi.
+    """
+    url = "https://graph.facebook.com/v18.0/me/messages"
+
+    # Meta 24-Hour Messaging Window Policy
+    # Agar 24 soat ichida bo'lsa: RESPONSE
+    # Agar o'tib ketgan bo'lsa: MESSAGE_TAG + HUMAN_AGENT
+    if within_24h_window:
+        messaging_type = "RESPONSE"
+        tag_field = {}
+    else:
+        messaging_type = "MESSAGE_TAG"
+        tag_field = {"tag": "HUMAN_AGENT"}
+        logger.info(
+            f"[IG Sender] 24h oynadan tashqari — "
+            f"MESSAGE_TAG/HUMAN_AGENT ishlatilmoqda | "
+            f"recipient={recipient_id}"
+        )
+
+    payload = {
+        "recipient": {"id": recipient_id},
+        "message": {"text": text},
+        "messaging_type": messaging_type,
+        "access_token": access_token,
+        **tag_field,
+    }
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                response = client.post(url, json=payload)
+
+            data = response.json()
+
+            if response.status_code == 200 and "message_id" in data:
+                return True
+
+            # Token eskirgan
+            if response.status_code == 400:
+                error = data.get("error", {})
+                error_code = error.get("code", 0)
+                if error_code in (190, 102):
+                    logger.error(
+                        f"Instagram: access token eskirgan! "
+                        f"Do'kon egasi token yangilashi kerak."
+                    )
+                    return False  # Retry foydasi yo'q
+
+                # Foydalanuvchi bot bilan muloqotni yopgan
+                error_subcode = error.get("error_subcode", 0)
+                if error_subcode in (2018108, 2018047):
+                    logger.warning(
+                        f"Instagram: foydalanuvchi xabar qabul qilishni "
+                        f"to'xtatgan | recipient={recipient_id}"
+                    )
+                    return False
+
+            # Rate limit
+            if response.status_code == 429:
+                logger.warning("Instagram rate limit! 30s kutilmoqda...")
+                time.sleep(30)
+                continue
+
+            logger.error(
+                f"Instagram API xatosi: {response.status_code} | {data}"
+            )
+
+            if attempt < max_retries:
+                time.sleep(2 ** attempt)
+
+        except httpx.TimeoutException:
+            logger.warning(
+                f"Instagram timeout (urinish {attempt}/{max_retries})"
+            )
+            if attempt < max_retries:
+                time.sleep(2 ** attempt)
+
+        except httpx.RequestError as e:
+            logger.error(
+                f"Instagram so'rov xatosi: {e}",
+                exc_info=True,
+            )
+            if attempt < max_retries:
+                time.sleep(2 ** attempt)
+
+        except Exception as e:
+            logger.error(f"Instagram kutilmagan xato: {e}", exc_info=True)
+            return False
+
+    return False
+
+
+# ─────────────────────────────────────────────────────────────
+# VOICE MESSAGE SENDER (Telegram + placeholder Instagram)
+# ─────────────────────────────────────────────────────────────
+
+def send_voice_reply(
+    store,
+    platform: str,
+    chat_id: str,
+    voice_bytes: bytes,
+    caption: str = "",
+) -> bool:
+    """
+    Operator TWA orqali mijozga ovozli xabar yuboradi.
+
+    Telegram: sendVoice API orqali
+    Instagram: Hozircha matn placeholder (Instagram DM'da voice API cheklangan)
+
+    Args:
+        store: Store obyekti
+        platform: "telegram" | "instagram"
+        chat_id: Mijoz chat/user ID
+        voice_bytes: Ovozli xabar bajt ma'lumoti
+        caption: Izoh matni (ixtiyoriy)
+
+    Returns:
+        True — yuborildi
+        False — xato
+    """
+    if platform == "telegram":
+        if not store.tg_bot_token:
+            logger.error(f"[Voice] Telegram token yo'q: store={store.name}")
+            return False
+
+        url = f"https://api.telegram.org/bot{store.tg_bot_token}/sendVoice"
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                files = {"voice": ("voice.ogg", voice_bytes, "audio/ogg")}
+                data = {"chat_id": chat_id}
+                if caption:
+                    data["caption"] = caption
+
+                response = client.post(url, data=data, files=files)
+
+            result = response.json()
+            if response.status_code == 200 and result.get("ok"):
+                logger.info(
+                    f"[Voice] Telegram ovozli xabar yuborildi: "
+                    f"chat_id={chat_id}"
+                )
+                return True
+            else:
+                logger.error(
+                    f"[Voice] Telegram sendVoice xatosi: {result}"
+                )
+                return False
+
+        except Exception as e:
+            logger.error(
+                f"[Voice] Telegram sendVoice kutilmagan xato: {e}",
+                exc_info=True,
+            )
+            return False
+
+    elif platform == "instagram":
+        # Instagram DM API voice xabar yuborishni to'g'ridan-to'g'ri qo'llab-quvvatlamaydi.
+        # Operatorga text placeholder yuboramiz.
+        logger.info(
+            f"[Voice] Instagram: voice to'g'ridan-to'g'ri qo'llab-quvvatlanmaydi, "
+            f"matn placeholder yuborilmoqda."
+        )
+        if not store.ig_access_token:
+            return False
+        placeholder = caption or "🎙️ Operator tomonidan ovozli xabar"
+        return send_instagram_message(
+            access_token=store.ig_access_token,
+            recipient_id=chat_id,
+            text=placeholder,
+        )
+
+    else:
+        logger.error(f"[Voice] Noto'g'ri platforma: {platform!r}")
+        return False

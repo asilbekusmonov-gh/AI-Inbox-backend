@@ -142,3 +142,112 @@ class SuperAdminStatsView(APIView):
             "stores": stores_list
         }, status=status.HTTP_200_OK)
 
+
+class InstagramConnectView(APIView):
+    """
+    Do'konga Instagram Business Akkauntini ulash.
+
+    POST /api/v1/store/instagram/connect/
+
+    Request Body:
+        {
+            "short_lived_token": "EAABw...",   # Meta Login'dan kelgan token
+            "selected_page_id": "123456"        # Ixtiyoriy — bir nechta sahifa bo'lsa
+        }
+
+    Response (muvaffaqiyatli):
+        {
+            "success": true,
+            "ig_page_id": "17841400...",
+            "facebook_page_name": "My Store",
+            "token_expires_at": "2026-10-25T12:00:00+05:00",
+            "pages": [...]  # faqat bir nechta sahifa bo'lsa va tanlanmagan bo'lsa
+        }
+
+    Xatoliklar:
+        400 — token noto'g'ri, Instagram akkaunt ulanmagan
+        502 — Meta API ishlamayapti
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def _get_store(self):
+        user = self.request.user
+        store = getattr(user, "store", None)
+        if not store or store.is_deleted:
+            store = Store.objects.filter(is_active=True, is_deleted=False).first()
+        return store
+
+    def post(self, request):
+        store = self._get_store()
+        if not store:
+            return Response(
+                {"error": "Do'kon topilmadi"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        short_lived_token = request.data.get("short_lived_token", "").strip()
+        selected_page_id = request.data.get("selected_page_id", "").strip() or None
+
+        if not short_lived_token:
+            return Response(
+                {"error": "short_lived_token maydoni majburiy"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.stores.services import connect_instagram_to_store
+
+        try:
+            result = connect_instagram_to_store(
+                store=store,
+                short_lived_token=short_lived_token,
+                selected_page_id=selected_page_id,
+            )
+            return Response(result, status=status.HTTP_200_OK)
+
+        except ValueError as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger("apps.stores").error(
+                f"Instagram connect kutilmagan xato: {e}",
+                exc_info=True,
+            )
+            return Response(
+                {"error": "Meta API bilan ulanishda kutilmagan xato yuz berdi"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+
+class InstagramDisconnectView(APIView):
+    """
+    Do'kondan Instagram akkauntini uzish.
+
+    DELETE /api/v1/store/instagram/disconnect/
+
+    Response:
+        {"success": true}
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def _get_store(self):
+        user = self.request.user
+        store = getattr(user, "store", None)
+        if not store or store.is_deleted:
+            store = Store.objects.filter(is_active=True, is_deleted=False).first()
+        return store
+
+    def delete(self, request):
+        store = self._get_store()
+        if not store:
+            return Response(
+                {"error": "Do'kon topilmadi"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        from apps.stores.services import disconnect_instagram_from_store
+
+        result = disconnect_instagram_from_store(store)
+        return Response(result, status=status.HTTP_200_OK)

@@ -56,7 +56,7 @@ class Command(BaseCommand):
                 store, created = Store.objects.get_or_create(
                     owner=admin_user,
                     defaults={
-                        "name": "Zulfiya Fashion Demo",
+                        "name": "AI Store Demo",
                         "platform": Store.Platform.TELEGRAM,
                         "tg_bot_token": bot_token,
                         "tg_bot_username": username,
@@ -90,7 +90,6 @@ class Command(BaseCommand):
                 # 3. Buyruqlar menyusi (/ tugmasini bossa chiqadigan menyu)
                 commands = [
                     {"command": "start", "description": "🤖 Botni ishga tushirish"},
-                    {"command": "dashboard", "description": "📊 Do'kon paneli (TWA)"},
                     {"command": "help", "description": "❓ Yordam va ko'rsatmalar"},
                 ]
                 client.post(
@@ -120,20 +119,11 @@ class Command(BaseCommand):
                 else:
                     self.stderr.write(self.style.ERROR(f"Webhook o'rnatishda xato: {res_data}"))
 
-        # 5. Menu Button (TWA WebApp) o'rnatish
-        target_twa_url = f"{public_url.rstrip('/')}/app/" if public_url else twa_url
-        if target_twa_url:
-            self.stdout.write(f"📱 Menu Button (TWA) o'rnatilmoqda: {target_twa_url}")
-            menu_payload = {
-                "menu_button": {
-                    "type": "web_app",
-                    "text": "📊 Dashboard",
-                    "web_app": {"url": target_twa_url}
-                }
-            }
-            with httpx.Client(timeout=10.0) as client:
-                res = client.post(f"https://api.telegram.org/bot{bot_token}/setChatMenuButton", json=menu_payload)
-                if res.json().get("ok"):
-                    self.stdout.write(self.style.SUCCESS("✅ TWA Dashboard Menu Button muvaffaqiyatli o'rnatildi!"))
+        # 5. Menu Button tozalash (Oddiy mijozlar uchun standart menyu bo'ladi)
+        menu_payload = {"menu_button": {"type": "default"}}
+        with httpx.Client(timeout=10.0) as client:
+            res = client.post(f"https://api.telegram.org/bot{bot_token}/setChatMenuButton", json=menu_payload)
+            if res.json().get("ok"):
+                self.stdout.write(self.style.SUCCESS("✅ Telegram menyu tugmasi standart mijoz rejimiga sozlandi!"))
 
         self.stdout.write(self.style.SUCCESS("🎉 Bot sozlamalari to'liq yakunlandi!"))

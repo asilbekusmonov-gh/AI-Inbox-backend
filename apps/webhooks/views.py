@@ -130,18 +130,28 @@ class TelegramWebhookView(View):
         text = (message.text or "").strip()
         sender_id = str(message.sender_id)
 
-        # 1. Deep-link /start store_123
+        # 1. Deep-link /start store_<uuid> yoki /start admin_<uuid>
         if text.startswith("/start"):
             parts = text.split()
             if len(parts) > 1:
                 param = parts[1].strip()
-                target_key = param.replace("store_", "").strip()
+                # admin_ yoki store_ prefixini olib tashlab, faqat UUID qoldiramiz
+                target_key = param
+                for prefix in ("admin_", "store_"):
+                    if param.startswith(prefix):
+                        target_key = param[len(prefix):]
+                        break
 
-                target_store = Store.objects.filter(
-                    Q(id=target_key) | Q(slug=target_key) | Q(tg_owner_chat_id=target_key),
-                    is_active=True,
-                    is_deleted=False
-                ).first()
+                # UUID bo'lmagan qiymat kiritilsa crash bo'lmasligi uchun try/except
+                target_store = None
+                try:
+                    target_store = Store.objects.filter(
+                        Q(id=target_key) | Q(slug=target_key) | Q(tg_owner_chat_id=target_key),
+                        is_active=True,
+                        is_deleted=False
+                    ).first()
+                except Exception:
+                    pass
 
                 if target_store:
                     CustomerSession.objects.update_or_create(
@@ -165,16 +175,15 @@ class TelegramWebhookView(View):
     def _get_store_by_token(self, bot_token: str) -> Store | None:
         """Bot token bo'yicha aktiv do'konni topadi"""
         try:
-            return Store.objects.select_related("owner").get(
+            return Store.objects.select_related("owner").filter(
                 tg_bot_token=bot_token,
                 is_active=True,
                 is_deleted=False,
-            )
-        except Store.DoesNotExist:
-            return None
+            ).order_by("-updated_at", "-created_at").first()
         except Exception as e:
             logger.error(f"Do'konni topishda xato: {e}", exc_info=True)
             return None
+
 
     def _is_duplicate(self, store_id, message: IncomingMessage) -> bool:
         """Idempotency: bu xabar avval qayta ishlanganmi?"""

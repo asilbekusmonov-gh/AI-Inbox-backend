@@ -36,7 +36,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             admin_user, _ = User.objects.get_or_create(username="default_admin")
             first_store, _ = Store.objects.get_or_create(
                 owner=admin_user,
-                defaults={"name": "Zulfiya Fashion Demo"}
+                defaults={"name": "AI Store Demo"}
             )
         return first_store
 

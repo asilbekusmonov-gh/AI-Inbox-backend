@@ -1,7 +1,9 @@
 """
 Customer Views — DRF ReadOnlyModelViewSet (Multi-tenant)
 """
-from rest_framework import viewsets, permissions, filters
+from rest_framework import viewsets, permissions, filters, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from .models import Customer
 from .serializers import CustomerSerializer
 
@@ -22,3 +24,20 @@ class CustomerViewSet(viewsets.ReadOnlyModelViewSet):
         if not hasattr(user, "store") or not user.store:
             return Customer.objects.none()
         return Customer.objects.filter(store=user.store, is_deleted=False)
+
+    @action(detail=True, methods=["post"], url_path="toggle-ai")
+    def toggle_ai(self, request, pk=None):
+        """Mijoz uchun AI faolligini o'chirish/yoqish (Handoff)"""
+        customer = self.get_object()
+        ai_active = request.data.get("ai_active")
+        if ai_active is not None:
+            customer.ai_active = bool(ai_active)
+        else:
+            customer.ai_active = not customer.ai_active
+        customer.save(update_fields=["ai_active", "updated_at"])
+        return Response({
+            "success": True,
+            "customer_id": str(customer.id),
+            "ai_active": customer.ai_active
+        }, status=status.HTTP_200_OK)
+

@@ -26,21 +26,21 @@ class Command(BaseCommand):
         store, _ = Store.objects.get_or_create(
             owner=admin_user,
             defaults={
-                "name": "Zulfiya Fashion Demo",
-                "description": "Ayollar va erkaklar uchun zamonaviy kiyimlar hamda original poyabzallar do'koni.",
+                "name": "AI Store Demo",
+                "description": "Rasmiy AI sotuvchisi va yordamchisi do'koni.",
                 "phone_number": "+998948111577",
                 "platform": Store.Platform.BOTH,
-                "ai_system_prompt": "Siz Zulfiya Fashion do'konining xushmuomala AI sotuvchisiz. Mijozlar bilan muloyim gaplashib, kiyim razmerlari, narx va yetkazib berish shartlarini tushuntiring.",
+                "ai_system_prompt": "Siz do'konning xushmuomala AI sotuvchisiz. Mijozlar bilan muloyim gaplashib, mahsulotlar, narx va yetkazib berish shartlarini tushuntiring.",
                 "ai_model": "gemini-2.5-flash",
                 "ai_active": True,
                 "tg_bot_token": "8667569896:AAG_AhRUvBqwQNqMtkBbozs7hxiqyfPP9r8",
-                "tg_bot_username": "ZulfiyaFashionBot",
+                "tg_bot_username": "Ai_InboxBot",
             }
         )
 
         # Update store fields if already exists
-        store.name = "Zulfiya Fashion Demo"
-        store.description = "Ayollar va erkaklar uchun zamonaviy kiyimlar hamda original poyabzallar do'koni."
+        store.name = "AI Store Demo"
+        store.description = "Rasmiy AI sotuvchisi va yordamchisi do'koni."
         store.phone_number = "+998948111577"
         store.ai_active = True
         store.save()

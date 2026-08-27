@@ -43,7 +43,7 @@ class Command(BaseCommand):
         self.stdout.write(f"📱 Chat ID: {chat_id} | Store: {store.name}")
 
         test_msg_id = f"test_msg_{int(time.time())}"
-        test_text = "Salom, Zulfiya Fashion do'konida qanday kiyimlar bor?"
+        test_text = "Salom, do'konda qanday mahsulotlar bor?"
 
         self.stdout.write(f"🤖 Task ishga tushirilmoqda: '{test_text}'")
 

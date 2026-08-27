@@ -178,6 +178,11 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 60 * 60 * 24,  # Har 24 soatda bir
         "options": {"queue": "maintenance"},
     },
+    "refresh-expiring-instagram-tokens-daily": {
+        "task": "apps.stores.tasks.refresh_expiring_instagram_tokens",
+        "schedule": 60 * 60 * 24,  # Har 24 soatda bir marta
+        "options": {"queue": "maintenance"},
+    },
 }
 
 
@@ -257,6 +262,9 @@ OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
 # ─────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
 TELEGRAM_WEBHOOK_SECRET = env("TELEGRAM_WEBHOOK_SECRET", default="")
+
+# Public URL (ngrok / cloudflare tunnel / production domain)
+PUBLIC_URL = env("PUBLIC_URL", default="").rstrip("/")
 
 
 # ─────────────────────────────────────────────

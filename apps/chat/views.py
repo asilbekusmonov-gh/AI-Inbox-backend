@@ -74,7 +74,8 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
             store=target_store,
             platform=customer.platform,
             chat_id=chat_id,
-            text=text
+            text=text,
+            customer=customer,
         )
 
         if not sent:
