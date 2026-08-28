@@ -78,6 +78,24 @@ class ChatMessage(BaseModel):
         null=True,
         help_text="Platformadan kelgan to'liq JSON payload (debug uchun)"
     )
+    media_url = models.CharField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="Media fayl URL adresi"
+    )
+    audio_url = models.CharField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="Ovozli xabar URL adresi"
+    )
+    audio_duration = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="Ovozli xabar davomiyligi (masalan: 0:15)"
+    )
 
     # ── Qayta ishlash holati ───────────────────────────────────
     processing_status = models.CharField(

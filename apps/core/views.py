@@ -15,19 +15,18 @@ logger = logging.getLogger("apps.core")
 @xframe_options_exempt
 def twa_dashboard_view(request):
     """Telegram Mini App (TWA) — Next.js static build'dan to'g'ridan-to'g'ri serve qiladi.
-    
-    MUHIM: Django render() ishlatilmaydi — Next.js HTML ichida {{ }} bor,
-    Django template engine uni buzadi. Shuning uchun raw FileResponse ishlatiladi.
+
+    static/twa/index.html dan to'g'ridan-to'g'ri FileResponse orqali serve qilinadi.
+    @xframe_options_exempt — Telegram iframe ichida ochishi uchun zarur.
     """
     import os
-    from django.http import FileResponse
+    from django.http import FileResponse, HttpResponseNotFound
     from django.conf import settings
 
-    html_path = os.path.join(settings.BASE_DIR, "templates", "twa_dashboard.html")
-    try:
-        return FileResponse(open(html_path, "rb"), content_type="text/html; charset=utf-8")
-    except FileNotFoundError:
-        return render(request, "index.html")
+    html_path = os.path.join(settings.BASE_DIR, "static", "twa", "index.html")
+    if not os.path.exists(html_path):
+        return HttpResponseNotFound("TWA not deployed yet. Run: ./deploy_twa.sh")
+    return FileResponse(open(html_path, "rb"), content_type="text/html; charset=utf-8")
 
 
 def privacy_policy_view(request):

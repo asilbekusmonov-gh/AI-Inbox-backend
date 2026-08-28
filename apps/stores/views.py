@@ -70,7 +70,6 @@ class StoreOnboardingView(generics.UpdateAPIView):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
-        serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         return Response(StoreSerializer(instance).data, status=status.HTTP_200_OK)
 
@@ -105,8 +104,8 @@ class SuperAdminStatsView(APIView):
         if bot_token:
             try:
                 url = f"https://api.telegram.org/bot{bot_token}/getMe"
-                with httpx.Client(timeout=3.0) as client:
-                    resp = client.post(url)
+                with httpx.Client(timeout=5.0) as client:
+                    resp = client.get(url)  # /getMe is a GET endpoint
                     data = resp.json()
                     if resp.status_code == 200 and data.get("ok"):
                         bot_active = True

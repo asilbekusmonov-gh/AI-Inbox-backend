@@ -237,7 +237,8 @@ def process_incoming_message(
             # Egasiga Telegram xabarnomasi yuboramiz
             if store.tg_owner_chat_id:
                 from apps.chat.senders import send_telegram_message
-                twa_url = "http://localhost:3000"
+                public_url = getattr(settings, "PUBLIC_URL", "").rstrip("/")
+                twa_url = f"{public_url}/app/" if public_url else "https://granddad-upstage-reflector.ngrok-free.dev/app/"
                 owner_alert = (
                     f"🚨 <b>OPERATOR ARALASHUVI KERAK!</b>\n\n"
                     f" do'koni: <b>{store.name}</b>\n"

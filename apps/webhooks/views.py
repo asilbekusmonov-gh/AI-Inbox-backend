@@ -13,6 +13,8 @@ Ishlash mantig'i:
 """
 import json
 import logging
+import httpx
+from django.conf import settings
 
 from django.http import HttpResponse, JsonResponse
 from django.views import View
@@ -328,7 +330,7 @@ def webhook_health(request):
         try:
             url = f"https://api.telegram.org/bot{bot_token}/getMe"
             with httpx.Client(timeout=5.0) as client:
-                resp = client.post(url)
+                resp = client.get(url)  # /getMe is a GET endpoint
                 data = resp.json()
                 if resp.status_code == 200 and data.get("ok"):
                     bot_active = True

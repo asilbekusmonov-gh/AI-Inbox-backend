@@ -164,6 +164,58 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
             return Response({"success": True, "ai_active": customer.ai_active}, status=status.HTTP_200_OK)
         except Customer.DoesNotExist:
             return Response({"error": "Mijoz topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=["patch"], url_path="toggle-block")
+    def toggle_block(self, request, pk=None):
+        """Mijozni bloklash/blokdan chiqarish: PATCH /api/v1/chat/<customer_id>/toggle-block/"""
+        target_store = self._get_target_store()
+        from apps.customers.models import Customer
+        try:
+            customer = Customer.objects.get(pk=pk, store=target_store)
+            customer.is_blocked = not customer.is_blocked
+            if customer.is_blocked:
+                customer.ai_active = False
+            customer.save(update_fields=["is_blocked", "ai_active", "updated_at"])
+            return Response({
+                "success": True,
+                "is_blocked": customer.is_blocked,
+                "ai_active": customer.ai_active
+            }, status=status.HTTP_200_OK)
+        except Customer.DoesNotExist:
+            return Response({"error": "Mijoz topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=["delete"], url_path="delete-thread")
+    def delete_thread(self, request, pk=None):
+        """Mijoz bilan barcha chat tarixini o'chirish: DELETE /api/v1/chat/<customer_id>/delete-thread/"""
+        target_store = self._get_target_store()
+        from apps.customers.models import Customer
+        try:
+            customer = Customer.objects.get(pk=pk, store=target_store)
+            ChatMessage.objects.filter(customer=customer, store=target_store).update(is_deleted=True)
+            return Response({"success": True}, status=status.HTTP_200_OK)
+        except Customer.DoesNotExist:
+            return Response({"error": "Mijoz topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=False, methods=["patch"], url_path="messages/(?P<msg_id>[^/.]+)/edit")
+    def edit_message(self, request, msg_id=None):
+        """Bitta xabarni tahrirlash: PATCH /api/v1/chat/messages/<msg_id>/edit/"""
+        target_store = self._get_target_store()
+        text = request.data.get("text", "").strip()
+        if not text:
+            return Response({"error": "Matn kiritilmadi"}, status=status.HTTP_400_BAD_REQUEST)
+
+        msg = ChatMessage.objects.filter(
+            Q(id=msg_id) | Q(message_id=msg_id),
+            store=target_store
+        ).first()
+
+        if not msg:
+            return Response({"error": "Xabar topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        msg.content = text
+        msg.save(update_fields=["content", "updated_at"])
+        return Response({"success": True, "text": text}, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=["delete", "post"], url_path="messages/(?P<msg_id>[^/.]+)/delete")
     def delete_single_message(self, request, msg_id=None):
         """Bitta xabarni o'chirish: DELETE /api/v1/chat/messages/<msg_id>/delete/"""
@@ -255,28 +307,6 @@ class ChatThreadListView(APIView):
     Frontend uchun ChatThread formati — xabarlarni mijoz bo'yicha guruhlaydi.
 
     GET /api/v1/chat/threads/
-
-    Qaytariladigan format (frontend ChatThread type):
-    [
-      {
-        "id": "<customer_id>",
-        "customer_id": "<customer_id>",
-        "customer_name": "Asilbek Usmonov",
-        "customer_phone": "+998901234567",
-        "platform": "telegram",
-        "avatar_url": null,
-        "last_message": "Nike Air Max 270 razmeri 42 bormi?",
-        "last_message_time": "14:30",
-        "unread_count": 1,
-        "ai_active": true,
-        "is_blocked": false,
-        "messages": [
-          {"id": "<msg_id>", "sender": "customer", "text": "...", "timestamp": "14:28"},
-          {"id": "<msg_id>", "sender": "ai",       "text": "...", "timestamp": "14:30"}
-        ]
-      },
-      ...
-    ]
     """
     permission_classes = [permissions.AllowAny]
 
@@ -319,6 +349,7 @@ class ChatThreadListView(APIView):
                     "avatar_url": None,
                     "last_message": "",
                     "last_message_time": "",
+                    "_last_datetime": msg.created_at,
                     "unread_count": 0,
                     "ai_active": cust.ai_active,
                     "is_blocked": cust.is_blocked,
@@ -337,16 +368,25 @@ class ChatThreadListView(APIView):
             created_local = msg.created_at
             time_str = created_local.strftime("%H:%M") if created_local else ""
 
-            threads_map[cid]["messages"].append({
+            msg_data = {
                 "id": str(msg.id),
                 "sender": sender,
                 "text": msg.content,
                 "timestamp": time_str,
-            })
+            }
+            if msg.audio_url:
+                msg_data["audio_url"] = msg.audio_url
+            if msg.audio_duration:
+                msg_data["audio_duration"] = msg.audio_duration
+            elif msg.audio_url:
+                msg_data["audio_duration"] = "0:15"
+
+            threads_map[cid]["messages"].append(msg_data)
 
             # Update last_message tracking
             threads_map[cid]["last_message"] = msg.content
             threads_map[cid]["last_message_time"] = time_str
+            threads_map[cid]["_last_datetime"] = msg.created_at
 
             # Count unread: customer messages that came after the last assistant message
             if msg.role == ChatMessage.Role.USER:
@@ -354,8 +394,8 @@ class ChatThreadListView(APIView):
             elif msg.role == ChatMessage.Role.ASSISTANT:
                 threads_map[cid]["unread_count"] = 0
 
-        # Return as list, most recently active first
+        # Return as list, most recently active first (sort by actual datetime)
         thread_list = list(threads_map.values())
-        thread_list.sort(key=lambda t: t["last_message_time"], reverse=True)
+        thread_list.sort(key=lambda t: t.pop("_last_datetime"), reverse=True)
 
         return Response(thread_list, status=status.HTTP_200_OK)

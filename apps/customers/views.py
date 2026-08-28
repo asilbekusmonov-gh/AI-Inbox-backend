@@ -13,17 +13,24 @@ class CustomerViewSet(viewsets.ReadOnlyModelViewSet):
     Do'kon mijozlarini ko'rish va qidirish.
     """
     serializer_class = CustomerSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]  # TWA JWT'siz ishlaydi
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["full_name", "phone_number", "username", "platform_user_id"]
     ordering_fields = ["last_message_at", "total_orders", "created_at"]
     ordering = ["-last_message_at"]
 
-    def get_queryset(self):
+    def _get_target_store(self):
         user = self.request.user
-        if not hasattr(user, "store") or not user.store:
+        if hasattr(user, "store") and user.store:
+            return user.store
+        from apps.stores.models import Store
+        return Store.objects.filter(is_active=True, is_deleted=False).first()
+
+    def get_queryset(self):
+        target_store = self._get_target_store()
+        if not target_store:
             return Customer.objects.none()
-        return Customer.objects.filter(store=user.store, is_deleted=False)
+        return Customer.objects.filter(store=target_store, is_deleted=False)
 
     @action(detail=True, methods=["post"], url_path="toggle-ai")
     def toggle_ai(self, request, pk=None):
