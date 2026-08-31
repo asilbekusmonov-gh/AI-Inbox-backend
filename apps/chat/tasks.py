@@ -49,8 +49,12 @@ def send_broadcast_message_task(
             text=message_text,
         )
 
+        from django.db.models import F
+
         if sent:
-            campaign.sent_count += 1
+            BroadcastCampaign.objects.filter(id=campaign_id).update(
+                sent_count=F('sent_count') + 1
+            )
             import uuid
             ChatMessage.objects.create(
                 store=store,
@@ -62,9 +66,12 @@ def send_broadcast_message_task(
                 processing_status=ChatMessage.ProcessingStatus.COMPLETED
             )
         else:
-            campaign.failed_count += 1
+            BroadcastCampaign.objects.filter(id=campaign_id).update(
+                failed_count=F('failed_count') + 1
+            )
 
-        campaign.save(update_fields=["sent_count", "failed_count", "updated_at"])
+        # Refresh from DB to get accurate counts
+        campaign.refresh_from_db()
 
         # Kampaniya yakunlanganini tekshirish
         if campaign.sent_count + campaign.failed_count >= campaign.total_recipients:
@@ -73,5 +80,8 @@ def send_broadcast_message_task(
             campaign.save(update_fields=["status", "completed_at", "updated_at"])
             logger.info(f"[Broadcast] Kampaniya yakunlandi: campaign_id={campaign.id} | sent={campaign.sent_count}")
 
+    except (BroadcastCampaign.DoesNotExist, Customer.DoesNotExist) as e:
+        logger.error(f"[Broadcast] Record topilmadi: {e}")
     except Exception as e:
         logger.error(f"[Broadcast Task Error] {e}", exc_info=True)
+        raise self.retry(exc=e)

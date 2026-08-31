@@ -243,6 +243,9 @@ SIMPLE_JWT = {
 # ─────────────────────────────────────────────
 from corsheaders.defaults import default_headers
 
+# ⚠️ XAVFSIZLIK: CORS_ALLOW_ALL_ORIGINS=True va CORS_ALLOW_CREDENTIALS=True
+# bir vaqtda ishlatilishi xavfsizlik muammosi. Production'da
+# CORS_ALLOW_ALL_ORIGINS=False qilib, CORS_ALLOWED_ORIGINS ro'yxatini belgilang.
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = list(default_headers) + [

@@ -422,10 +422,11 @@ def get_ai_response(store, customer, user_message: str) -> AIResponse:
             model_used=store.ai_model,
         )
 
-    fallback_models = [
-        "gemini-3.6-flash",
-        "gemini-flash-latest",
-    ]
+    # Use store owner's selected model first, then fallback
+    primary_model = getattr(store, 'ai_model', '') or 'gemini-2.5-flash'
+    fallback_models = [primary_model]
+    if primary_model != 'gemini-2.0-flash':
+        fallback_models.append('gemini-2.0-flash')
     last_error = None
 
     for model_name in fallback_models:

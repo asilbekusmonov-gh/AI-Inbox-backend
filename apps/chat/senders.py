@@ -94,7 +94,17 @@ def _send_telegram_chunk(
             with httpx.Client(timeout=10.0) as client:
                 response = client.post(url, json=payload)
 
-            data = response.json()
+            try:
+                data = response.json()
+            except Exception:
+                logger.error(
+                    f"Telegram API JSON parse xatosi: "
+                    f"status={response.status_code} | body={response.text[:200]}"
+                )
+                if attempt < max_retries:
+                    time.sleep(2 ** attempt)
+                    continue
+                return False
 
             if response.status_code == 200 and data.get("ok"):
                 return True

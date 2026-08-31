@@ -156,7 +156,11 @@ def process_incoming_message(
                 # TWA URL: PUBLIC_URL .env dan olinadi (ngrok yoki production domain)
                 public_url = getattr(settings, "PUBLIC_URL", "").rstrip("/")
                 if not public_url:
-                    public_url = "https://granddad-upstage-reflector.ngrok-free.dev"
+                    logger.error("PUBLIC_URL sozlanmagan! TWA havolasi yaratilmaydi.")
+                    ChatMessage.objects.filter(id=chat_message.id).update(
+                        processing_status=ChatMessage.ProcessingStatus.COMPLETED
+                    )
+                    return
                 twa_url = f"{public_url}/app/"
                 reply_markup = {
                     "inline_keyboard": [
@@ -238,7 +242,9 @@ def process_incoming_message(
             if store.tg_owner_chat_id:
                 from apps.chat.senders import send_telegram_message
                 public_url = getattr(settings, "PUBLIC_URL", "").rstrip("/")
-                twa_url = f"{public_url}/app/" if public_url else "https://granddad-upstage-reflector.ngrok-free.dev/app/"
+                if not public_url:
+                    logger.error("PUBLIC_URL sozlanmagan! Operator xabarnomasi TWA havolasisiz yuboriladi.")
+                twa_url = f"{public_url}/app/" if public_url else ""
                 owner_alert = (
                     f"🚨 <b>OPERATOR ARALASHUVI KERAK!</b>\n\n"
                     f" do'koni: <b>{store.name}</b>\n"
@@ -247,16 +253,18 @@ def process_incoming_message(
                     f"💬 Xabar: <i>\"{text}\"</i>\n\n"
                     f"<i>AI bot vaqtincha to'xtatildi. Operator javob berishi kutilmoqda.</i>"
                 )
-                reply_markup = {
-                    "inline_keyboard": [
-                        [
-                            {
-                                "text": "💬 Chatni Ochish (Dashboard)",
-                                "web_app": {"url": twa_url}
-                            }
+                reply_markup = None
+                if twa_url:
+                    reply_markup = {
+                        "inline_keyboard": [
+                            [
+                                {
+                                    "text": "💬 Chatni Ochish (Dashboard)",
+                                    "web_app": {"url": twa_url}
+                                }
+                            ]
                         ]
-                    ]
-                }
+                    }
                 send_telegram_message(
                     bot_token=store.tg_bot_token,
                     chat_id=store.tg_owner_chat_id,

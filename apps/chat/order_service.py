@@ -60,8 +60,14 @@ def create_order_from_ai_data(
             items = []
 
         # Jami summani hisoblash
+        def _safe_number(val, default=0):
+            try:
+                return float(str(val).replace(' ', '').replace(',', ''))
+            except (ValueError, TypeError):
+                return default
+
         total_amount = sum(
-            float(item.get("price", 0)) * int(item.get("qty", 1))
+            _safe_number(item.get("price", 0)) * int(_safe_number(item.get("qty", 1)) or 1)
             for item in items
             if isinstance(item, dict)
         )
@@ -95,11 +101,10 @@ def create_order_from_ai_data(
             customer.save(update_fields=update_fields)
 
         # Buyurtma sonini yangilash
+        from django.db.models import F
         from apps.customers.models import Customer as CustomerModel
         CustomerModel.objects.filter(id=customer.id).update(
-            total_orders=CustomerModel.objects.filter(
-                id=customer.id
-            ).values_list("total_orders", flat=True)[0] + 1
+            total_orders=F('total_orders') + 1
         )
 
         logger.info(

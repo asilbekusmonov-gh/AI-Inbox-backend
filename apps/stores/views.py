@@ -21,17 +21,19 @@ class StoreDetailUpdateView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         user = self.request.user
-        store = getattr(user, "store", None)
-        if not store or store.is_deleted:
-            store = Store.objects.filter(is_active=True, is_deleted=False).first()
-            if not store:
-                from django.contrib.auth.models import User
-                admin_user, _ = User.objects.get_or_create(username="default_admin")
-                store, _ = Store.objects.get_or_create(
-                    owner=admin_user,
-                    defaults={"name": "Zulfiya Fashion Demo"}
-                )
-        return store
+        if user.is_authenticated:
+            store = getattr(user, "store", None)
+            if store and not store.is_deleted:
+                return store
+        # TWA yoki unauthenticated so'rovlar uchun X-Store-ID header'dan olamiz
+        store_id = self.request.headers.get('X-Store-ID') or self.request.query_params.get('store_id')
+        if store_id:
+            try:
+                return Store.objects.get(id=store_id, is_active=True, is_deleted=False)
+            except (Store.DoesNotExist, ValueError):
+                pass
+        from rest_framework.exceptions import NotFound
+        raise NotFound("Do'kon topilmadi. X-Store-ID header yoki store_id parametrini yuboring.")
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
@@ -53,17 +55,19 @@ class StoreOnboardingView(generics.UpdateAPIView):
 
     def get_object(self):
         user = self.request.user
-        store = getattr(user, "store", None)
-        if not store or store.is_deleted:
-            store = Store.objects.filter(is_active=True, is_deleted=False).first()
-            if not store:
-                from django.contrib.auth.models import User
-                admin_user, _ = User.objects.get_or_create(username="default_admin")
-                store, _ = Store.objects.get_or_create(
-                    owner=admin_user,
-                    defaults={"name": "Demo Merchant"}
-                )
-        return store
+        if user.is_authenticated:
+            store = getattr(user, "store", None)
+            if store and not store.is_deleted:
+                return store
+        # TWA yoki unauthenticated so'rovlar uchun X-Store-ID header'dan olamiz
+        store_id = self.request.headers.get('X-Store-ID') or self.request.query_params.get('store_id')
+        if store_id:
+            try:
+                return Store.objects.get(id=store_id, is_active=True, is_deleted=False)
+            except (Store.DoesNotExist, ValueError):
+                pass
+        from rest_framework.exceptions import NotFound
+        raise NotFound("Do'kon topilmadi. X-Store-ID header yoki store_id parametrini yuboring.")
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
@@ -171,10 +175,17 @@ class InstagramConnectView(APIView):
 
     def _get_store(self):
         user = self.request.user
-        store = getattr(user, "store", None)
-        if not store or store.is_deleted:
-            store = Store.objects.filter(is_active=True, is_deleted=False).first()
-        return store
+        if user.is_authenticated:
+            store = getattr(user, "store", None)
+            if store and not store.is_deleted:
+                return store
+        store_id = self.request.headers.get('X-Store-ID') or self.request.query_params.get('store_id')
+        if store_id:
+            try:
+                return Store.objects.get(id=store_id, is_active=True, is_deleted=False)
+            except (Store.DoesNotExist, ValueError):
+                pass
+        return None
 
     def post(self, request):
         store = self._get_store()
@@ -233,10 +244,17 @@ class InstagramDisconnectView(APIView):
 
     def _get_store(self):
         user = self.request.user
-        store = getattr(user, "store", None)
-        if not store or store.is_deleted:
-            store = Store.objects.filter(is_active=True, is_deleted=False).first()
-        return store
+        if user.is_authenticated:
+            store = getattr(user, "store", None)
+            if store and not store.is_deleted:
+                return store
+        store_id = self.request.headers.get('X-Store-ID') or self.request.query_params.get('store_id')
+        if store_id:
+            try:
+                return Store.objects.get(id=store_id, is_active=True, is_deleted=False)
+            except (Store.DoesNotExist, ValueError):
+                pass
+        return None
 
     def delete(self, request):
         store = self._get_store()

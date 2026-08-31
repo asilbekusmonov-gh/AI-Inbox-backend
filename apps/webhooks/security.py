@@ -29,14 +29,19 @@ def verify_telegram_webhook(request) -> bool:
     try:
         secret_token = getattr(settings, "TELEGRAM_WEBHOOK_SECRET", None)
         if not secret_token:
-            return True
+            logger.error(
+                "TELEGRAM_WEBHOOK_SECRET sozlanmagan! "
+                "Production muhitda webhook tekshiruvi o'tkazilmaydi."
+            )
+            return False
 
         incoming_token = (
             request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
             or request.META.get("HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN", "")
         )
         if not incoming_token:
-            return True
+            logger.warning("Telegram webhook: secret token header topilmadi")
+            return False
 
         return hmac.compare_digest(
             incoming_token.encode("utf-8"),
@@ -44,7 +49,7 @@ def verify_telegram_webhook(request) -> bool:
         )
     except Exception as e:
         logger.error(f"Telegram imzo tekshirishda xato: {e}")
-        return True
+        return False
 
 
 # ─────────────────────────────────────────────────────────────
