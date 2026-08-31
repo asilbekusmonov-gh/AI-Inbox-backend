@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import Customer
 from .serializers import CustomerSerializer
+from apps.core.authentication import get_store_from_request
 
 
 class CustomerViewSet(viewsets.ReadOnlyModelViewSet):
@@ -13,18 +14,15 @@ class CustomerViewSet(viewsets.ReadOnlyModelViewSet):
     Do'kon mijozlarini ko'rish va qidirish.
     """
     serializer_class = CustomerSerializer
-    permission_classes = [permissions.AllowAny]  # TWA JWT'siz ishlaydi
+    permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["full_name", "phone_number", "username", "platform_user_id"]
     ordering_fields = ["last_message_at", "total_orders", "created_at"]
     ordering = ["-last_message_at"]
 
     def _get_target_store(self):
-        user = self.request.user
-        if hasattr(user, "store") and user.store:
-            return user.store
-        from apps.stores.models import Store
-        return Store.objects.filter(is_active=True, is_deleted=False).first()
+        """Xavfsiz store aniqlash: .first() fallback YO'Q!"""
+        return get_store_from_request(self.request)
 
     def get_queryset(self):
         target_store = self._get_target_store()

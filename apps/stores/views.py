@@ -5,6 +5,7 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from .models import Store
 from .serializers import StoreSerializer, StoreConfigUpdateSerializer, StoreOnboardingSerializer
+from apps.core.authentication import get_store_from_request
 
 
 class StoreDetailUpdateView(generics.RetrieveUpdateAPIView):
@@ -12,7 +13,7 @@ class StoreDetailUpdateView(generics.RetrieveUpdateAPIView):
     Do'kon egasi uchun o'z profil va AI prompt sozlamalarini olish/yangilash endpointi.
     GET/PATCH /api/v1/store/
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_serializer_class(self):
         if self.request.method in ["PUT", "PATCH"]:
@@ -20,20 +21,11 @@ class StoreDetailUpdateView(generics.RetrieveUpdateAPIView):
         return StoreSerializer
 
     def get_object(self):
-        user = self.request.user
-        if user.is_authenticated:
-            store = getattr(user, "store", None)
-            if store and not store.is_deleted:
-                return store
-        # TWA yoki unauthenticated so'rovlar uchun X-Store-ID header'dan olamiz
-        store_id = self.request.headers.get('X-Store-ID') or self.request.query_params.get('store_id')
-        if store_id:
-            try:
-                return Store.objects.get(id=store_id, is_active=True, is_deleted=False)
-            except (Store.DoesNotExist, ValueError):
-                pass
-        from rest_framework.exceptions import NotFound
-        raise NotFound("Do'kon topilmadi. X-Store-ID header yoki store_id parametrini yuboring.")
+        store = get_store_from_request(self.request)
+        if not store:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Do'kon topilmadi. Telegram yoki JWT orqali kiring.")
+        return store
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
@@ -50,24 +42,15 @@ class StoreOnboardingView(generics.UpdateAPIView):
     Merchant soha turini va boshlang'ich mahsulot/xizmatlarini yuboradi.
     PUT/PATCH /api/v1/store/onboarding/
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
     serializer_class = StoreOnboardingSerializer
 
     def get_object(self):
-        user = self.request.user
-        if user.is_authenticated:
-            store = getattr(user, "store", None)
-            if store and not store.is_deleted:
-                return store
-        # TWA yoki unauthenticated so'rovlar uchun X-Store-ID header'dan olamiz
-        store_id = self.request.headers.get('X-Store-ID') or self.request.query_params.get('store_id')
-        if store_id:
-            try:
-                return Store.objects.get(id=store_id, is_active=True, is_deleted=False)
-            except (Store.DoesNotExist, ValueError):
-                pass
-        from rest_framework.exceptions import NotFound
-        raise NotFound("Do'kon topilmadi. X-Store-ID header yoki store_id parametrini yuboring.")
+        store = get_store_from_request(self.request)
+        if not store:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Do'kon topilmadi. Telegram yoki JWT orqali kiring.")
+        return store
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
@@ -87,7 +70,7 @@ class SuperAdminStatsView(APIView):
     SaaS Platforma Egasi (Super Admin) uchun barcha platforma ko'rsatkichlari endpointi:
     GET /api/v1/superadmin/stats/
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         from apps.stores.models import Store
@@ -171,21 +154,10 @@ class InstagramConnectView(APIView):
         400 — token noto'g'ri, Instagram akkaunt ulanmagan
         502 — Meta API ishlamayapti
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def _get_store(self):
-        user = self.request.user
-        if user.is_authenticated:
-            store = getattr(user, "store", None)
-            if store and not store.is_deleted:
-                return store
-        store_id = self.request.headers.get('X-Store-ID') or self.request.query_params.get('store_id')
-        if store_id:
-            try:
-                return Store.objects.get(id=store_id, is_active=True, is_deleted=False)
-            except (Store.DoesNotExist, ValueError):
-                pass
-        return None
+        return get_store_from_request(self.request)
 
     def post(self, request):
         store = self._get_store()
@@ -240,21 +212,10 @@ class InstagramDisconnectView(APIView):
     Response:
         {"success": true}
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def _get_store(self):
-        user = self.request.user
-        if user.is_authenticated:
-            store = getattr(user, "store", None)
-            if store and not store.is_deleted:
-                return store
-        store_id = self.request.headers.get('X-Store-ID') or self.request.query_params.get('store_id')
-        if store_id:
-            try:
-                return Store.objects.get(id=store_id, is_active=True, is_deleted=False)
-            except (Store.DoesNotExist, ValueError):
-                pass
-        return None
+        return get_store_from_request(self.request)
 
     def delete(self, request):
         store = self._get_store()

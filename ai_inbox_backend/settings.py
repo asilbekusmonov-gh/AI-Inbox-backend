@@ -191,7 +191,10 @@ CELERY_BEAT_SCHEDULE = {
 # ─────────────────────────────────────────────
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        # 1. JWT Authentication (do'kon egasi standart login orqali)
         "rest_framework_simplejwt.authentication.JWTAuthentication",
+        # 2. Telegram initData Authentication (TWA dashboard uchun)
+        "apps.core.authentication.TelegramInitDataAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",

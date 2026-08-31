@@ -25,6 +25,7 @@ from drf_spectacular.views import (
 )
 
 from apps.stores.views import SuperAdminStatsView
+from apps.webhooks.views import webhook_health
 
 app_name = "api_v1"
 
@@ -44,5 +45,7 @@ urlpatterns = [
     path("orders/", include("apps.orders.urls")),
     path("customers/", include("apps.customers.urls")),
     path("chat/", include("apps.chat.urls")),
+    path("webhooks/health/", webhook_health, name="webhooks_health"),
     path("superadmin/stats/", SuperAdminStatsView.as_view(), name="superadmin_stats"),
 ]
+

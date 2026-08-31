@@ -23,7 +23,6 @@ except Exception as e:
 done
 
 echo "Migratsiyalarni bajarish..."
-python manage.py makemigrations --noinput || true
 python manage.py migrate --noinput
 
 echo "Static fayllarni yig'ish..."

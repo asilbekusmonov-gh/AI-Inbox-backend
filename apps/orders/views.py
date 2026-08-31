@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from .models import Order
 from .serializers import OrderSerializer, OrderStatusUpdateSerializer
 from apps.stores.models import Store
+from apps.core.authentication import get_store_from_request
 
 
 class OrderViewSet(viewsets.ModelViewSet):
@@ -14,19 +15,15 @@ class OrderViewSet(viewsets.ModelViewSet):
     Buyurtmalarni ko'rish, qidirish va holatini yangilash.
     """
     serializer_class = OrderSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["order_number", "customer_full_name", "customer_phone", "delivery_address"]
     ordering_fields = ["created_at", "total_amount", "status"]
     ordering = ["-created_at"]
 
     def _get_target_store(self):
-        user = self.request.user
-        if hasattr(user, "store") and user.store:
-            return user.store
-        
-        first_store = Store.objects.filter(is_active=True, is_deleted=False).first()
-        return first_store
+        """Xavfsiz store aniqlash: .first() fallback YO'Q!"""
+        return get_store_from_request(self.request)
 
     def get_queryset(self):
         """Multi-tenant: Faqat tegishli store buyurtmalari va o'chirilmaganlari"""

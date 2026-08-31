@@ -15,6 +15,7 @@ from django.db.models import Max, Count, Q
 from .models import ChatMessage
 from .serializers import ChatMessageSerializer
 from apps.stores.models import Store
+from apps.core.authentication import get_store_from_request
 
 
 class ChatMessageViewSet(viewsets.ModelViewSet):
@@ -22,16 +23,14 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
     Do'kon xabarlar tarixini ko'rish (Live Inbox), operator javobi hamda AI Handoff.
     """
     serializer_class = ChatMessageSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ["created_at"]
     ordering = ["-created_at"]
 
     def _get_target_store(self):
-        user = self.request.user
-        if hasattr(user, "store") and user.store:
-            return user.store
-        return Store.objects.filter(is_active=True, is_deleted=False).first()
+        """Xavfsiz store aniqlash: .first() fallback YO'Q!"""
+        return get_store_from_request(self.request)
 
     def get_queryset(self):
         target_store = self._get_target_store()
@@ -308,13 +307,11 @@ class ChatThreadListView(APIView):
 
     GET /api/v1/chat/threads/
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def _get_target_store(self):
-        user = self.request.user
-        if hasattr(user, "store") and user.store:
-            return user.store
-        return Store.objects.filter(is_active=True, is_deleted=False).first()
+        """Xavfsiz store aniqlash: .first() fallback YO'Q!"""
+        return get_store_from_request(self.request)
 
     def get(self, request):
         target_store = self._get_target_store()

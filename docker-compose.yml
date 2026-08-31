@@ -33,16 +33,18 @@ services:
       timeout: 5s
       retries: 5
 
-  # 3. Django Web Server
+  # 3. Django Web Server (Gunicorn)
   web:
     build: .
     container_name: ai_inbox_web
     restart: always
-    command: python manage.py runserver 0.0.0.0:8000
+    command: gunicorn ai_inbox_backend.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 120 --access-logfile - --error-logfile -
     volumes:
       - .:/app
-    ports:
-      - "8000:8000"
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    expose:
+      - "8000"
     env_file:
       - .env
     environment:
@@ -65,6 +67,7 @@ services:
     command: celery -A ai_inbox_backend worker --loglevel=info -Q webhooks,messages,notifications,maintenance
     volumes:
       - .:/app
+      - media_volume:/app/media
     env_file:
       - .env
     environment:
@@ -79,7 +82,7 @@ services:
       redis:
         condition: service_healthy
 
-  # 5. Celery Beat (Data Retention periodic task)
+  # 5. Celery Beat (Periodic Tasks)
   celery_beat:
     build: .
     container_name: ai_inbox_celery_beat
@@ -101,6 +104,21 @@ services:
       redis:
         condition: service_healthy
 
+  # 6. Nginx Reverse Proxy & Static File Server
+  nginx:
+    build: ./nginx
+    container_name: ai_inbox_nginx
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - static_volume:/app/staticfiles:ro
+      - media_volume:/app/media:ro
+    depends_on:
+      - web
+
 volumes:
   postgres_data:
   redis_data:
+  static_volume:
+  media_volume:
