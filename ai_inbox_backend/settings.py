@@ -8,7 +8,7 @@ import os
 from django.core.exceptions import ImproperlyConfigured
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(override=False)  # Docker env vars (DB_HOST=db) ustidan yozmaslik uchun
 except ImportError:
     pass
 
@@ -120,9 +120,9 @@ DATABASES = {
         "PASSWORD": env("DB_PASSWORD", required=True),
         "HOST": env("DB_HOST", default="localhost"),
         "PORT": env("DB_PORT", default="5432"),
-        "CONN_MAX_AGE": 60,          # Connection pooling (60 soniya)
+        "CONN_MAX_AGE": 0,           # Docker uchun connection pooling o'chirilgan
         "OPTIONS": {
-            "connect_timeout": 10,   # DB ulanish timeout
+            "connect_timeout": 30,   # DB ulanish timeout (10 dan 30 ga oshirildi)
         },
     }
 }
@@ -271,6 +271,10 @@ TELEGRAM_WEBHOOK_SECRET = env("TELEGRAM_WEBHOOK_SECRET", default="")
 
 # Public URL (ngrok / cloudflare tunnel / production domain)
 PUBLIC_URL = env("PUBLIC_URL", default="").rstrip("/")
+
+if PUBLIC_URL:
+    CSRF_TRUSTED_ORIGINS = [PUBLIC_URL, "https://*.ngrok-free.dev", "https://*.ngrok-free.app"]
+
 
 
 # ─────────────────────────────────────────────

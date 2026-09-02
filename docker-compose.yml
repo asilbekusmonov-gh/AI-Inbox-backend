@@ -45,14 +45,16 @@ services:
       - media_volume:/app/media
     expose:
       - "8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - .env
     environment:
-      - DB_HOST=db
-      - DB_PORT=5432
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - DB_HOST=host.docker.internal
+      - DB_PORT=5454
+      - REDIS_URL=redis://host.docker.internal:6380/0
+      - CELERY_BROKER_URL=redis://host.docker.internal:6380/0
+      - CELERY_RESULT_BACKEND=redis://host.docker.internal:6380/1
     depends_on:
       db:
         condition: service_healthy
@@ -68,14 +70,16 @@ services:
     volumes:
       - .:/app
       - media_volume:/app/media
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - .env
     environment:
-      - DB_HOST=db
-      - DB_PORT=5432
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - DB_HOST=host.docker.internal
+      - DB_PORT=5454
+      - REDIS_URL=redis://host.docker.internal:6380/0
+      - CELERY_BROKER_URL=redis://host.docker.internal:6380/0
+      - CELERY_RESULT_BACKEND=redis://host.docker.internal:6380/1
     depends_on:
       db:
         condition: service_healthy
@@ -90,14 +94,16 @@ services:
     command: celery -A ai_inbox_backend beat --loglevel=info
     volumes:
       - .:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - .env
     environment:
-      - DB_HOST=db
-      - DB_PORT=5432
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - DB_HOST=host.docker.internal
+      - DB_PORT=5454
+      - REDIS_URL=redis://host.docker.internal:6380/0
+      - CELERY_BROKER_URL=redis://host.docker.internal:6380/0
+      - CELERY_RESULT_BACKEND=redis://host.docker.internal:6380/1
     depends_on:
       db:
         condition: service_healthy
