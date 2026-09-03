@@ -289,8 +289,15 @@ def _load_conversation_history(store, customer) -> list[dict]:
         )
 
         # Gemini API uchun tarix qoidasi: user -> model -> user -> model almashishi shart
+        #
+        # ⚠️ BUG FIX: Avval ketma-ket kelgan bir xil role'dagi xabarlar
+        # (masalan mijoz ikkita xabarni ketma-ket yozsa) shunchaki
+        # TASHLAB YUBORILARDI (skip qilinardi), ya'ni AI bu xabarlar haqida
+        # umuman bilmasdi va kontekst yo'qolardi. Endi ketma-ket kelgan
+        # bir xil role'dagi xabarlar bitta elementga BIRLASHTIRILADI —
+        # hech qanday matn yo'qolmaydi va Gemini'ning alternating-role
+        # talabi ham buzilmaydi.
         history = []
-        last_role = None
 
         for msg in reversed(list(messages)):
             role = "user" if msg.role == ChatMessage.Role.USER else "model"
@@ -299,13 +306,17 @@ def _load_conversation_history(store, customer) -> list[dict]:
             if not history and role != "user":
                 continue
 
-            # Ketma-ket bir xil role kelmasligi kerak
-            if role != last_role and msg.content:
+            if not msg.content:
+                continue
+
+            if history and history[-1]["role"] == role:
+                # Ketma-ket bir xil role — matnni oldingi elementga qo'shamiz
+                history[-1]["parts"][0]["text"] += f"\n{msg.content}"
+            else:
                 history.append({
                     "role": role,
                     "parts": [{"text": msg.content}],
                 })
-                last_role = role
 
         # Oxirgi element 'model' bo'lsa yaxshi (keyingi xabar 'user' bo'ladi)
         return history

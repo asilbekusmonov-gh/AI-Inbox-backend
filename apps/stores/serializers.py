@@ -172,7 +172,12 @@ class StoreOnboardingSerializer(serializers.ModelSerializer):
             instance = super().update(instance, validated_data)
 
             if items_data is not None:
-                Product.objects.filter(store=instance).delete()
+                # ⚠️ BUG FIX: `.delete()` bazadan HARD DELETE qiladi, bu esa
+                # apps/core/models.py'dagi loyiha qoidasini buzadi:
+                # "Hech qachon hard DELETE yo'q / Hech qachon .delete() chaqirmang!"
+                # Har doim soft_delete() ishlatilishi kerak.
+                for old_product in Product.objects.filter(store=instance):
+                    old_product.soft_delete()
                 for item in items_data:
                     Product.objects.create(
                         store=instance,

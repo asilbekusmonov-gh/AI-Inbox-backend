@@ -145,10 +145,19 @@ class TelegramWebhookView(View):
                         break
 
                 # UUID bo'lmagan qiymat kiritilsa crash bo'lmasligi uchun try/except
+                #
+                # ⚠️ BUG FIX: Store modelida "slug" degan maydon UMUMAN YO'Q
+                # (apps/stores/models.py'ni tekshiring). Shu sababli quyidagi
+                # so'rov HAR DOIM django.core.exceptions.FieldError bilan
+                # portlar edi va pastdagi keng `except Exception: pass` uni
+                # jimgina yutib yuborardi — natijada target_store doim None
+                # bo'lib qolar, ya'ni /start admin_<uuid> va /start store_<uuid>
+                # deep-link orqali do'konga yo'naltirish funksiyasi UMUMAN
+                # ishlamas edi (Single Master Bot Model buzilgan edi).
                 target_store = None
                 try:
                     target_store = Store.objects.filter(
-                        Q(id=target_key) | Q(slug=target_key) | Q(tg_owner_chat_id=target_key),
+                        Q(id=target_key) | Q(tg_owner_chat_id=target_key),
                         is_active=True,
                         is_deleted=False
                     ).first()

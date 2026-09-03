@@ -280,6 +280,10 @@ if PUBLIC_URL:
 # ─────────────────────────────────────────────
 # META / INSTAGRAM
 # ─────────────────────────────────────────────
+# ⚠️ BUG FIX: META_APP_ID avval bu yerda umuman yo'q edi — shu sababli
+# apps/stores/services.py._get_app_credentials() har doim ValueError
+# ko'tarardi va Instagram ulash (OAuth) funksiyasi ishlamas edi.
+META_APP_ID = env("META_APP_ID", default="")
 META_APP_SECRET = env("META_APP_SECRET", default="")
 META_VERIFY_TOKEN = env("META_VERIFY_TOKEN", default="")
 

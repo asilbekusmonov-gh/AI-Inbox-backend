@@ -2,6 +2,8 @@
 Management command to seed initial demo data for Zulfiya Fashion Demo.
 Usage: python manage.py seed_demo_data --settings=ai_inbox_backend.settings_dev
 """
+import os
+
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
 from apps.stores.models import Store
@@ -23,6 +25,15 @@ class Command(BaseCommand):
             admin_user.set_password("admin123")
             admin_user.save()
 
+        # ⚠️ SECURITY FIX: Avval bu yerda HAQIQIY, ishlaydigan Telegram bot
+        # tokeni ochiq matnda (hardcoded) yozilgan edi va Git repository'ga
+        # commit qilingan bo'lishi mumkin. Bu tokenni har kim ko'rib, botni
+        # o'z nomidan boshqarishi mumkin edi. Endi token .env'dan
+        # (DEMO_TG_BOT_TOKEN) o'qiladi va sozlanmagan bo'lsa bo'sh qoldiriladi.
+        # ⚠️ Agar eski token ("8667569896:AAG_...") avval commit qilingan
+        # bo'lsa, uni @BotFather orqali DARHOL revoke/rotate qiling!
+        demo_bot_token = os.environ.get("DEMO_TG_BOT_TOKEN", "")
+
         store, _ = Store.objects.get_or_create(
             owner=admin_user,
             defaults={
@@ -33,7 +44,7 @@ class Command(BaseCommand):
                 "ai_system_prompt": "Siz do'konning xushmuomala AI sotuvchisiz. Mijozlar bilan muloyim gaplashib, mahsulotlar, narx va yetkazib berish shartlarini tushuntiring.",
                 "ai_model": "gemini-2.5-flash",
                 "ai_active": True,
-                "tg_bot_token": "8667569896:AAG_AhRUvBqwQNqMtkBbozs7hxiqyfPP9r8",
+                "tg_bot_token": demo_bot_token,
                 "tg_bot_username": "Ai_InboxBot",
             }
         )

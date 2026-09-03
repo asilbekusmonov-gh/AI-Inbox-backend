@@ -69,8 +69,15 @@ class SuperAdminStatsView(APIView):
     """
     SaaS Platforma Egasi (Super Admin) uchun barcha platforma ko'rsatkichlari endpointi:
     GET /api/v1/superadmin/stats/
+
+    ⚠️ BUG FIX: Avval faqat IsAuthenticated tekshirilardi — bu shuni
+    anglatardiki, HAR QANDAY oddiy do'kon egasi (tenant) o'z JWT tokeni
+    bilan ushbu endpointga kirib, BARCHA do'konlarning daromadi, bot
+    holati va boshqa maxfiy statistikasini ko'ra olardi. Bu multi-tenant
+    izolyatsiya qoidasini buzadigan jiddiy xavfsizlik zaifligi edi.
+    Endi faqat is_staff/is_superuser bo'lgan platforma xodimlari kira oladi.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAdminUser]
 
     def get(self, request):
         from apps.stores.models import Store

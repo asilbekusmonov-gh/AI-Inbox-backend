@@ -7,6 +7,8 @@ Endpoints:
   POST /api/v1/chat/<id>/reply/       → Operator sends manual reply
   PATCH /api/v1/chat/<id>/toggle-ai/  → Toggle AI handoff for the store
 """
+import uuid
+
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -16,6 +18,24 @@ from .models import ChatMessage
 from .serializers import ChatMessageSerializer
 from apps.stores.models import Store
 from apps.core.authentication import get_store_from_request
+
+
+def _message_lookup_q(msg_id):
+    """
+    Xabarni PK (UUID) yoki platforma message_id bo'yicha qidirish uchun Q quradi.
+
+    ⚠️ BUG FIX: `id` maydoni UUIDField, shuning uchun `Q(id=msg_id)` ga
+    UUID formatidagi bo'lmagan qiymat (masalan Telegram/Instagram'ning
+    o'z message_id'si yoki "op_xxxxx"/"bc_xxxxx" kabi ID'lar) berilsa,
+    Django ORM ValueError/ValidationError ko'tarar va endpoint 500 xato
+    bilan qulardi. Endi id= filtri faqat msg_id haqiqiy UUID bo'lsa
+    qo'shiladi, aks holda faqat message_id bo'yicha qidiriladi.
+    """
+    try:
+        uuid.UUID(str(msg_id))
+        return Q(id=msg_id) | Q(message_id=msg_id)
+    except (ValueError, TypeError, AttributeError):
+        return Q(message_id=msg_id)
 
 
 class ChatMessageViewSet(viewsets.ModelViewSet):
@@ -204,7 +224,7 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
             return Response({"error": "Matn kiritilmadi"}, status=status.HTTP_400_BAD_REQUEST)
 
         msg = ChatMessage.objects.filter(
-            Q(id=msg_id) | Q(message_id=msg_id),
+            _message_lookup_q(msg_id),
             store=target_store
         ).first()
 
@@ -227,7 +247,7 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
 
         # Match by PK (UUID), message_id or voice ID
         updated_count = ChatMessage.objects.filter(
-            Q(id=msg_id) | Q(message_id=msg_id) | Q(message_id__icontains=msg_id),
+            _message_lookup_q(msg_id) | Q(message_id__icontains=msg_id),
             store=target_store
         ).update(is_deleted=True)
 
@@ -241,8 +261,23 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
         if not msg_ids or not isinstance(msg_ids, list):
             return Response({"error": "O'chiriladigan xabarlar ko'rsatilmadi"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # ⚠️ BUG FIX: `id__in` UUIDField ustida — ro'yxatda UUID bo'lmagan
+        # message_id qiymatlari bo'lsa (masalan Telegram/Instagram xabar
+        # ID'lari), Django ValueError ko'tarib 500 xato qaytarardi.
+        # Endi faqat haqiqiy UUID qiymatlar `id__in` filtriga qo'shiladi.
+        valid_uuids = []
+        for mid in msg_ids:
+            try:
+                valid_uuids.append(uuid.UUID(str(mid)))
+            except (ValueError, TypeError, AttributeError):
+                continue
+
+        lookup = Q(message_id__in=msg_ids)
+        if valid_uuids:
+            lookup |= Q(id__in=valid_uuids)
+
         updated_count = ChatMessage.objects.filter(
-            Q(id__in=msg_ids) | Q(message_id__in=msg_ids),
+            lookup,
             store=target_store
         ).update(is_deleted=True)
         return Response({"success": True, "deleted_count": updated_count}, status=status.HTTP_200_OK)
