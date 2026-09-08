@@ -162,6 +162,11 @@ def process_incoming_message(
                     )
                     return
                 twa_url = f"{public_url}/app/"
+                # NOTE: on a free ngrok tunnel, Telegram's Mini App webview will
+                # hit ngrok's browser-warning interstitial instead of the real
+                # dashboard — there's no header/query-param workaround for a
+                # webview we don't control. Switch tunnel providers or upgrade
+                # ngrok to remove that interstitial; this button itself is fine.
                 reply_markup = {
                     "inline_keyboard": [
                         [
@@ -180,6 +185,30 @@ def process_incoming_message(
                     parse_mode="HTML",
                     reply_markup=reply_markup,
                 )
+
+                # Chat menu tugmasini ham shu Do'kon Egasi uchun "Dashboard"
+                # Web App tugmasiga almashtiramiz — shunda pastdagi umumiy
+                # "Menu" yozuvi o'rniga to'g'ridan-to'g'ri dashboardni ochadigan
+                # tugma chiqadi (faqat shu ega uchun, chat_id bilan cheklangan —
+                # oddiy mijozlar hali ham standart "Menu"ni ko'radi).
+                try:
+                    import httpx as _httpx
+                    with _httpx.Client(timeout=10.0) as _client:
+                        _res = _client.post(
+                            f"https://api.telegram.org/bot{store.tg_bot_token}/setChatMenuButton",
+                            json={
+                                "chat_id": int(chat_id),
+                                "menu_button": {
+                                    "type": "web_app",
+                                    "text": "Dashboard",
+                                    "web_app": {"url": twa_url},
+                                },
+                            },
+                        )
+                        if not _res.json().get("ok"):
+                            logger.warning(f"[Task] Menu button o'rnatilmadi: {_res.json()}")
+                except Exception as e:
+                    logger.warning(f"[Task] Menu button o'rnatishda xato: {e}")
             else:
                 logger.info(f"[Task] Mijoz /start keldi -> TWA tugmasiz do'rtona qutlov yuborilmoqda")
                 customer_text = (

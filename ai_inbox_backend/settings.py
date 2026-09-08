@@ -247,13 +247,22 @@ SIMPLE_JWT = {
 from corsheaders.defaults import default_headers
 
 # ⚠️ XAVFSIZLIK: CORS_ALLOW_ALL_ORIGINS=True va CORS_ALLOW_CREDENTIALS=True
-# bir vaqtda ishlatilishi xavfsizlik muammosi. Production'da
-# CORS_ALLOW_ALL_ORIGINS=False qilib, CORS_ALLOWED_ORIGINS ro'yxatini belgilang.
-CORS_ALLOW_ALL_ORIGINS = True
+# bir vaqtda ishlatilishi xavfsizlik muammosi. Shu sababli bu endi DEBUG'ga
+# bog'liq: dev'da (DEBUG=True) barcha originlarga ruxsat beriladi (qulaylik
+# uchun), production'da (DEBUG=False) esa faqat .env'dagi
+# CORS_ALLOWED_ORIGINS ro'yxatidagi domenlarga ruxsat beriladi.
+CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-telegram-init-data",
 ]
+
+if not DEBUG:
+    CORS_ALLOWED_ORIGINS = [
+        origin.strip()
+        for origin in env("CORS_ALLOWED_ORIGINS", default="").split(",")
+        if origin.strip()
+    ]
 
 
 # ─────────────────────────────────────────────
