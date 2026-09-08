@@ -178,7 +178,7 @@ class Command(BaseCommand):
                     {"id": "item-4", "product_name": "Nike Sport Futbolkasi", "quantity": 2, "unit_price": 95000, "total_price": 190000}
                 ],
                 "total_amount": 190000,
-                "status": Order.Status.DELIVERED,
+                "status": Order.Status.COMPLETED,
             },
         ]
 

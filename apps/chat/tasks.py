@@ -47,6 +47,7 @@ def send_broadcast_message_task(
             platform=platform,
             chat_id=chat_id,
             text=message_text,
+            customer=customer,
         )
 
         from django.db.models import F

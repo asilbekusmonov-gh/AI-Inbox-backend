@@ -34,7 +34,6 @@ class Command(BaseCommand):
             return
 
         public_url = options.get("url")
-        twa_url = options.get("twa_url")
 
         self.stdout.write(f"🤖 Telegram Bot tekshirilmoqda (Token: {bot_token[:10]}...)...")
 
@@ -62,7 +61,6 @@ class Command(BaseCommand):
                         "tg_bot_username": username,
                     }
                 )
-                store.ai_model = "gemini-3.6-flash"
                 if not created and store.tg_bot_token != bot_token:
                     store.tg_bot_token = bot_token
                     store.tg_bot_username = username

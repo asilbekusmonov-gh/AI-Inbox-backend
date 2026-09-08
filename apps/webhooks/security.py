@@ -7,7 +7,6 @@ haqiqiyligini tekshiradi. Soxta so'rovlarni rad etadi.
 import hashlib
 import hmac
 import logging
-import time
 
 from django.conf import settings
 

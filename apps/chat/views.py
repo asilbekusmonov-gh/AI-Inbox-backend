@@ -13,10 +13,9 @@ from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.db.models import Max, Count, Q
+from django.db.models import Q
 from .models import ChatMessage
 from .serializers import ChatMessageSerializer
-from apps.stores.models import Store
 from apps.core.authentication import get_store_from_request
 
 
@@ -148,8 +147,15 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
             platform=customer.platform,
             chat_id=customer.platform_user_id,
             voice_bytes=voice_bytes,
-            caption="🎙️ Ovozli xabar"
+            caption="🎙️ Ovozli xabar",
+            customer=customer,
         )
+
+        if not sent:
+            return Response(
+                {"error": "Ovozli xabarni foydalanuvchiga yuborib bo'lmadi (Platforma xatosi)"},
+                status=status.HTTP_502_BAD_GATEWAY
+            )
 
         import uuid
         msg = ChatMessage.objects.create(
@@ -219,7 +225,7 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
     def edit_message(self, request, msg_id=None):
         """Bitta xabarni tahrirlash: PATCH /api/v1/chat/messages/<msg_id>/edit/"""
         target_store = self._get_target_store()
-        text = request.data.get("text", "").strip()
+        text = (request.data.get("text") or "").strip()
         if not text:
             return Response({"error": "Matn kiritilmadi"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -291,7 +297,7 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
         """
         target_store = self._get_target_store()
         title = request.data.get("title", "Ommaviy Reklama")
-        message_text = request.data.get("message_text", "").strip()
+        message_text = (request.data.get("message_text") or "").strip()
 
         if not message_text:
             return Response({"error": "Xabar matni kiritilmadi"}, status=status.HTTP_400_BAD_REQUEST)

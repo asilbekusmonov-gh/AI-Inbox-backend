@@ -48,9 +48,9 @@ class Command(BaseCommand):
 
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS(f"=== 🛍️ DO'KON: {store.name} (ID: {store.id}) ==="))
-        self.stdout.write(f"👑 Admin Havolasi (100% UNIKAL — Do'kon Egasiga Yuboring):")
+        self.stdout.write("👑 Admin Havolasi (100% UNIKAL — Do'kon Egasiga Yuboring):")
         self.stdout.write(self.style.WARNING(f"👉 {admin_link}"))
         self.stdout.write("")
-        self.stdout.write(f"🛍️ Mijozlar Havolasi (Xaridorlar Uchun):")
+        self.stdout.write("🛍️ Mijozlar Havolasi (Xaridorlar Uchun):")
         self.stdout.write(self.style.NOTICE(f"👉 {customer_link}"))
         self.stdout.write("")

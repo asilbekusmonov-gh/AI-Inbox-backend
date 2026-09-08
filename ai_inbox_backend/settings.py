@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     "django_celery_results",
 
     # Loyiha app'lari
+    "apps.core",
     "apps.stores",
     "apps.products",
     "apps.customers",
@@ -162,7 +163,7 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 # Noisy Neighbor oldini olish uchun — har bir do'kon alohida navbatda
 CELERY_TASK_ROUTES = {
-    "apps.chat.tasks.process_message": {"queue": "messages"},
+    "apps.chat.tasks.send_broadcast_message_task": {"queue": "messages"},
     "apps.webhooks.tasks.*": {"queue": "webhooks"},
     "apps.notifications.tasks.*": {"queue": "notifications"},
 }

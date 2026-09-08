@@ -147,7 +147,7 @@ def process_incoming_message(
             from apps.chat.senders import send_telegram_message
 
             if is_admin:
-                logger.info(f"[Task] Admin /start keldi -> Dashboard TWA tugmasi yuborilmoqda")
+                logger.info("[Task] Admin /start keldi -> Dashboard TWA tugmasi yuborilmoqda")
                 welcome_text = (
                     f"<b>Assalomu alaykum, Xurmatli {store.name} Do'kon Egasi! 👑</b>\n\n"
                     f"Boshqaruv paneli orqali kelgan buyurtmalarni ko'rish, katalogingizni boshqarish hamda "
@@ -210,7 +210,7 @@ def process_incoming_message(
                 except Exception as e:
                     logger.warning(f"[Task] Menu button o'rnatishda xato: {e}")
             else:
-                logger.info(f"[Task] Mijoz /start keldi -> TWA tugmasiz do'rtona qutlov yuborilmoqda")
+                logger.info("[Task] Mijoz /start keldi -> TWA tugmasiz do'rtona qutlov yuborilmoqda")
                 customer_text = (
                     f"<b>Assalomu alaykum! {store.name} rasmiy sotuv botiga xush kelibsiz! 😊</b>\n\n"
                     f"Katalogimizdagi mahsulotlar, razmerlar, narxlar va yetkazib berish bo'yicha savolingiz bo'lsa, "
@@ -229,7 +229,7 @@ def process_incoming_message(
             return
 
         if cmd_text.startswith("/help") or cmd_text in ["help", "yordam"]:
-            logger.info(f"[Task] /help buyrug'i keldi -> Yordam ko'rsatmasi yuborilmoqda")
+            logger.info("[Task] /help buyrug'i keldi -> Yordam ko'rsatmasi yuborilmoqda")
             help_text = (
                 f"<b>❓ Yordam va Ko'rsatmalar — {store.name}</b>\n\n"
                 f"1. 💬 <b>Savol berish</b>: Shunchaki xabaringizni yozing, AI sotuvchimiz darhol javob beradi.\n"
@@ -265,7 +265,7 @@ def process_incoming_message(
         if is_handoff_requested:
             logger.info(f"[Task] Mijoz operator so'radi! Handoff rejimiga o'tilmoqda: customer={customer}")
             customer.ai_active = False
-            customer.save(update_fields=["ai_active"])
+            customer.save(update_fields=["ai_active", "updated_at"])
 
             # Egasiga Telegram xabarnomasi yuboramiz
             if store.tg_owner_chat_id:
@@ -276,7 +276,7 @@ def process_incoming_message(
                 twa_url = f"{public_url}/app/" if public_url else ""
                 owner_alert = (
                     f"🚨 <b>OPERATOR ARALASHUVI KERAK!</b>\n\n"
-                    f" do'koni: <b>{store.name}</b>\n"
+                    f"🏪 Do'kon: <b>{store.name}</b>\n"
                     f"👤 Mijoz: <b>{customer.full_name or customer.username or customer.platform_user_id}</b>\n"
                     f"📲 Platforma: <b>{platform.upper()}</b>\n"
                     f"💬 Xabar: <i>\"{text}\"</i>\n\n"
@@ -339,7 +339,7 @@ def process_incoming_message(
             f"has_order={ai_response.has_order}"
         )
 
-        # ── 5. AI javobini DB'ga saqlash ──────────────────────────────
+        # ── 5.5. AI javobini DB'ga saqlash ─────────────────────────────
         ai_message = ChatMessage.objects.create(
             store=store,
             customer=customer,
@@ -359,6 +359,7 @@ def process_incoming_message(
             platform=platform,
             chat_id=chat_id,
             text=ai_response.text,
+            customer=customer,
         )
 
         if not sent:
@@ -571,7 +572,7 @@ def download_and_store_chat_media(self, chat_message_id: str):
         saved_url = download_and_save_media_file(media_url=media_url, media_type=media_type)
         if saved_url:
             msg.media_url = saved_url
-            msg.save(update_fields=["media_url"])
+            msg.save(update_fields=["media_url", "updated_at"])
             logger.info(
                 f"[Media Task] Muvaffaqiyatli saqlandi va ChatMessage.media_url yangilandi: "
                 f"msg_id={chat_message_id} | url={saved_url}"

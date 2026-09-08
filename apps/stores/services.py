@@ -253,7 +253,6 @@ def connect_instagram_to_store(store, short_lived_token: str, selected_page_id: 
     Raises:
         ValueError: Agar Instagram akkaunt topilmasa yoki xato bo'lsa
     """
-    from apps.stores.models import Store
 
     # ── 1. Token almashtirish ─────────────────────────────────
     try:

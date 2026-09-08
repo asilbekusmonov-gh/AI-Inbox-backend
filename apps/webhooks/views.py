@@ -346,16 +346,27 @@ def webhook_health(request):
                     bot_username = data.get("result", {}).get("username", "unknown")
                 else:
                     # Bot token yaroqsiz bo'lsa — do'kon egasiga zudlik bilan Telegram xabarnomasi
-                    from apps.stores.models import Store
-                    from apps.chat.senders import send_telegram_message
-                    stores = Store.objects.filter(is_active=True, is_deleted=False)
-                    for store in stores:
-                        if store.tg_owner_chat_id:
-                            send_telegram_message(
-                                bot_token=bot_token,
-                                chat_id=store.tg_owner_chat_id,
-                                text="🚨 DIQQAT! PLATFORMA TELEGRAM BOTI ALOQADAN UZILDI!\n\nBot tokeni yaroqsiz bo'ldi yoki Telegram API ishlamayapti. Iltimos, sozlamalarni tekshiring!"
-                            )
+                    #
+                    # ⚠️ BUG FIX: /health endpoint uptime-monitor tomonidan har
+                    # daqiqada chaqirilishi mumkin. Cache-based cooldown bo'lmasa,
+                    # bot tokeni buzilgan har safar BARCHA do'kon egalariga
+                    # qayta-qayta (masalan daqiqada bir marta) xabar ketardi —
+                    # bu ham Telegram rate-limitga tegib botni bloklatib qo'yishi,
+                    # ham egalarni spam bilan bezovta qilishi mumkin edi.
+                    # Endi bu xabarnoma har bir bot uchun 1 soatda faqat bir marta yuboriladi.
+                    from django.core.cache import cache
+                    cooldown_key = f"webhook_health_alert_sent:{bot_token}"
+                    if cache.add(cooldown_key, True, timeout=60 * 60):
+                        from apps.stores.models import Store
+                        from apps.chat.senders import send_telegram_message
+                        stores = Store.objects.filter(is_active=True, is_deleted=False)
+                        for store in stores:
+                            if store.tg_owner_chat_id:
+                                send_telegram_message(
+                                    bot_token=bot_token,
+                                    chat_id=store.tg_owner_chat_id,
+                                    text="🚨 DIQQAT! PLATFORMA TELEGRAM BOTI ALOQADAN UZILDI!\n\nBot tokeni yaroqsiz bo'ldi yoki Telegram API ishlamayapti. Iltimos, sozlamalarni tekshiring!"
+                                )
         except Exception as e:
             logger.error(f"Master Bot Health Check Exception: {e}")
 

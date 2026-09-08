@@ -22,7 +22,7 @@ class Command(BaseCommand):
             process_incoming_message(
                 store_id=str(store.id),
                 platform="telegram",
-                message_id=f"test_start_{store.id[:5]}",
+                message_id=f"test_start_{str(store.id)[:5]}",
                 sender_id=store.tg_owner_chat_id or "12345678",
                 sender_username="TestUser",
                 text="/start",

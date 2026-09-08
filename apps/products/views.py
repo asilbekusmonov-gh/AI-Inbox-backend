@@ -6,8 +6,7 @@ Qoidalar:
   do'kon egasi o'z do'konining mahsulotlarini boshqaradi.
 - Autentifikatsiya bo'lmagan so'rovlar 401 bilan rad etiladi.
 """
-from rest_framework import viewsets, permissions, filters, status
-from rest_framework.response import Response
+from rest_framework import viewsets, permissions, filters
 from .models import Product
 from .serializers import ProductSerializer
 from apps.core.authentication import get_store_from_request

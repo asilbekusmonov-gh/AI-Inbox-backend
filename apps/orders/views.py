@@ -6,7 +6,6 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import Order
 from .serializers import OrderSerializer, OrderStatusUpdateSerializer
-from apps.stores.models import Store
 from apps.core.authentication import get_store_from_request
 
 

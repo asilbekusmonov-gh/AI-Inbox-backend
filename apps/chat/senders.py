@@ -6,14 +6,12 @@ Har bir sender:
 - Tarmoq uzilishida retry qiladi
 - Uzoq xabarlarni bo'lib yuboradi
 """
-import json
 import logging
 import time
 from datetime import timedelta
 from typing import Optional
 
 import httpx
-from django.conf import settings
 from django.utils import timezone
 
 logger = logging.getLogger("apps.chat")
@@ -631,8 +629,8 @@ def _send_instagram_chunk(
                 error_code = error.get("code", 0)
                 if error_code in (190, 102):
                     logger.error(
-                        f"Instagram: access token eskirgan! "
-                        f"Do'kon egasi token yangilashi kerak."
+                        "Instagram: access token eskirgan! "
+                        "Do'kon egasi token yangilashi kerak."
                     )
                     return False  # Retry foydasi yo'q
 
@@ -690,6 +688,7 @@ def send_voice_reply(
     chat_id: str,
     voice_bytes: bytes,
     caption: str = "",
+    customer=None,
 ) -> bool:
     """
     Operator TWA orqali mijozga ovozli xabar yuboradi.
@@ -703,6 +702,7 @@ def send_voice_reply(
         chat_id: Mijoz chat/user ID
         voice_bytes: Ovozli xabar bajt ma'lumoti
         caption: Izoh matni (ixtiyoriy)
+        customer: Customer obyekti (ixtiyoriy — Instagram 24h window uchun)
 
     Returns:
         True — yuborildi
@@ -747,8 +747,8 @@ def send_voice_reply(
         # Instagram DM API voice xabar yuborishni to'g'ridan-to'g'ri qo'llab-quvvatlamaydi.
         # Operatorga text placeholder yuboramiz.
         logger.info(
-            f"[Voice] Instagram: voice to'g'ridan-to'g'ri qo'llab-quvvatlanmaydi, "
-            f"matn placeholder yuborilmoqda."
+            "[Voice] Instagram: voice to'g'ridan-to'g'ri qo'llab-quvvatlanmaydi, "
+            "matn placeholder yuborilmoqda."
         )
         if not store.ig_access_token:
             return False
@@ -757,6 +757,7 @@ def send_voice_reply(
             access_token=store.ig_access_token,
             recipient_id=chat_id,
             text=placeholder,
+            within_24h_window=_check_24h_window(customer),
         )
 
     else:

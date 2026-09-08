@@ -17,7 +17,7 @@ Instagram xabar turlari (Task 2):
   - quick_reply   : Quick Reply tugmasini bosish
 """
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 logger = logging.getLogger("apps.webhooks")
@@ -86,7 +86,6 @@ def parse_telegram_payload(payload: dict) -> Optional[IncomingMessage]:
         text = message.get("text", "").strip()
         voice = message.get("voice")
         if not text and voice:
-            file_id = voice.get("file_id", "")
             duration = voice.get("duration", 0)
             text = f"🎙️ Ovozli xabar ({duration}s)"
         elif not text:

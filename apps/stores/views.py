@@ -3,7 +3,6 @@ Store Views — DRF (Multi-tenant)
 """
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
-from .models import Store
 from .serializers import StoreSerializer, StoreConfigUpdateSerializer, StoreOnboardingSerializer
 from apps.core.authentication import get_store_from_request
 
@@ -174,8 +173,8 @@ class InstagramConnectView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        short_lived_token = request.data.get("short_lived_token", "").strip()
-        selected_page_id = request.data.get("selected_page_id", "").strip() or None
+        short_lived_token = (request.data.get("short_lived_token") or "").strip()
+        selected_page_id = (request.data.get("selected_page_id") or "").strip() or None
 
         if not short_lived_token:
             return Response(

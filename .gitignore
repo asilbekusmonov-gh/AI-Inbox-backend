@@ -19,8 +19,13 @@ ENV/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+db_dev.sqlite3
 staticfiles/
 media/
+
+# TWA frontend build output (copied in by deploy_twa.sh from the
+# separate Ai-Inbox-frontend repo — never the source, always regenerable)
+static/twa/
 
 # Environment variables — HECH QACHON PUSH QILMANG!
 .env
