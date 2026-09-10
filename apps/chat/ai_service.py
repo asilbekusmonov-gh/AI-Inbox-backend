@@ -434,10 +434,19 @@ def get_ai_response(store, customer, user_message: str) -> AIResponse:
         )
 
     # Use store owner's selected model first, then fallback
-    primary_model = getattr(store, 'ai_model', '') or 'gemini-2.5-flash'
+    #
+    # ⚠️ BUG FIX: "gemini-2.5-flash" (avvalgi standart) va "gemini-2.0-flash"
+    # (avvalgi fallback) ikkalasi ham ushbu loyiha Gemini API kaliti uchun
+    # o'chirilgan ("no longer available" xatosi qaytaradi). Google'ning o'zi
+    # xato xabarida "gemini-3.6-flash"ga o'tishni tavsiya qiladi — jonli
+    # tekshirib ko'rilib, ishlashi tasdiqlangan. Do'konlarning bazadagi eski
+    # ai_model qiymati hali "gemini-2.5-flash" bo'lsa ham, fallback shu yerda
+    # ishlaydi (faqat bitta ortiqcha muvaffaqiyatsiz urinish narxiga).
+    WORKING_FALLBACK_MODEL = 'gemini-3.6-flash'
+    primary_model = getattr(store, 'ai_model', '') or WORKING_FALLBACK_MODEL
     fallback_models = [primary_model]
-    if primary_model != 'gemini-2.0-flash':
-        fallback_models.append('gemini-2.0-flash')
+    if primary_model != WORKING_FALLBACK_MODEL:
+        fallback_models.append(WORKING_FALLBACK_MODEL)
     last_error = None
 
     for model_name in fallback_models:
@@ -456,7 +465,7 @@ def get_ai_response(store, customer, user_message: str) -> AIResponse:
     )
 
 
-def _call_gemini(store, customer, user_message: str, model_name: str = "gemini-2.5-flash") -> AIResponse:
+def _call_gemini(store, customer, user_message: str, model_name: str = "gemini-3.6-flash") -> AIResponse:
     """
     Gemini API'ga so'rov yuboradi.
     """

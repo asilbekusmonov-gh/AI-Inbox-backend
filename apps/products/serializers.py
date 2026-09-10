@@ -44,7 +44,13 @@ class ProductSerializer(serializers.ModelSerializer):
             # Clean description for display
             ret["description"] = re.sub(r"\[IMG:\s*(https?://[^\s\]]+|data:image/[^\s\]]+)\]\s*", "", desc).strip()
         else:
-            ret["image_url"] = "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&auto=format&fit=crop&q=60"
+            # ⚠️ BUG FIX: avval bu yerda rasm bo'lmagan HAR BIR mahsulot uchun
+            # bir xil hardcode qilingan (kategoriyaga mos kelmaydigan) krossovka
+            # rasmi qaytarilardi — hatto egasi rasmni frontend'da o'chirib,
+            # saqlagandan keyin ham, keyingi GET so'rovida yana o'sha rasm
+            # qaytib chiqardi (o'chirish hech qachon "ushlanmagan" ko'rinardi).
+            # Endi rasm yo'qligi haqiqatan ham yo'q deb qaytariladi.
+            ret["image_url"] = None
 
         return ret
 

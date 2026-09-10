@@ -123,8 +123,8 @@ class Store(BaseModel):
     )
     ai_model = models.CharField(
         max_length=50,
-        default="gemini-2.5-flash",
-        help_text="Qaysi AI modeli ishlatilsin (gemini-2.5-flash va h.k.)"
+        default="gemini-3.6-flash",
+        help_text="Qaysi AI modeli ishlatilsin (gemini-3.6-flash va h.k.)"
     )
     ai_temperature = models.FloatField(
         default=0.7,

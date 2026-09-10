@@ -6,10 +6,18 @@ Qoidalar:
   do'kon egasi o'z do'konining mahsulotlarini boshqaradi.
 - Autentifikatsiya bo'lmagan so'rovlar 401 bilan rad etiladi.
 """
-from rest_framework import viewsets, permissions, filters
+import logging
+
+from rest_framework import viewsets, permissions, filters, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+
 from .models import Product
 from .serializers import ProductSerializer
+from .ai_service import generate_product_description
 from apps.core.authentication import get_store_from_request
+
+logger = logging.getLogger("apps.products")
 
 
 class ProductViewSet(viewsets.ModelViewSet):
@@ -48,4 +56,41 @@ class ProductViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         """Soft Delete: bazadan o'chirilmaydi, is_deleted=True bo'ladi"""
         instance.soft_delete()
+
+    @action(detail=False, methods=["post"], url_path="generate-description")
+    def generate_description(self, request):
+        """
+        AI orqali mahsulot/kurs/xizmat tavsifini generatsiya qiladi:
+        POST /api/v1/products/generate-description/
+        Body: {"name": "...", "category": "...", "price": ..., "stock": ...}
+        """
+        target_store = self._get_target_store()
+        if not target_store:
+            return Response({"error": "Do'kon topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        name = (request.data.get("name") or "").strip()
+        if not name:
+            return Response({"error": "Nomi kiritilmagan"}, status=status.HTTP_400_BAD_REQUEST)
+
+        category = (request.data.get("category") or "").strip()
+        category_type = request.data.get("category_type") or getattr(target_store, "category_type", "e_commerce")
+        price = request.data.get("price")
+        stock = request.data.get("stock")
+
+        try:
+            description = generate_product_description(
+                name=name,
+                category_type=category_type,
+                category=category,
+                price=price,
+                stock=stock,
+            )
+        except Exception as e:
+            logger.error(f"[AI Description] Generatsiya xatosi: {e} | store={target_store.name}", exc_info=True)
+            return Response(
+                {"error": "AI tavsif yaratib bo'lmadi. Birozdan so'ng qayta urinib ko'ring."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response({"description": description}, status=status.HTTP_200_OK)
 

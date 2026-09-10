@@ -84,8 +84,49 @@ def _determine_file_extension(media_type: str, content_type: str, media_url: str
     TYPE_MAP = {
         "image": ".jpg",
         "video": ".mp4",
-        "audio": ".mp3",
+        "audio": ".ogg",  # Telegram ovozli xabarlari OGG/Opus formatida keladi
         "sticker": ".png",
         "file": ".bin",
     }
     return TYPE_MAP.get(media_type, ".jpg")
+
+
+def resolve_telegram_file_url(bot_token: str, file_id: str) -> Optional[str]:
+    """
+    Telegram getFile API orqali file_id'ni yuklab olinadigan to'liq URL'ga aylantiradi.
+
+    Telegram ovozli xabarlarida (voice) faqat file_id keladi — haqiqiy audio
+    ma'lumotini olish uchun avval getFile chaqirib file_path topish, so'ng
+    https://api.telegram.org/file/bot<TOKEN>/<file_path> orqali yuklab olish kerak.
+
+    Returns:
+        To'liq yuklab olish URL'i yoki None (xato bo'lsa)
+    """
+    if not bot_token or not file_id:
+        return None
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            response = client.get(
+                f"https://api.telegram.org/bot{bot_token}/getFile",
+                params={"file_id": file_id},
+            )
+
+        data = response.json()
+        if not data.get("ok"):
+            logger.warning(f"[Telegram getFile] xato: {data}")
+            return None
+
+        file_path = data.get("result", {}).get("file_path")
+        if not file_path:
+            logger.warning(f"[Telegram getFile] file_path topilmadi: {data}")
+            return None
+
+        return f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+
+    except httpx.TimeoutException:
+        logger.error("[Telegram getFile] Timeout (15s)")
+        return None
+    except Exception as e:
+        logger.error(f"[Telegram getFile] Kutilmagan xato: {e}", exc_info=True)
+        return None

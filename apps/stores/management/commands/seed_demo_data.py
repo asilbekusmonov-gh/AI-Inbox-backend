@@ -42,7 +42,7 @@ class Command(BaseCommand):
                 "phone_number": "+998948111577",
                 "platform": Store.Platform.BOTH,
                 "ai_system_prompt": "Siz do'konning xushmuomala AI sotuvchisiz. Mijozlar bilan muloyim gaplashib, mahsulotlar, narx va yetkazib berish shartlarini tushuntiring.",
-                "ai_model": "gemini-2.5-flash",
+                "ai_model": "gemini-3.6-flash",
                 "ai_active": True,
                 "tg_bot_token": demo_bot_token,
                 "tg_bot_username": "Ai_InboxBot",

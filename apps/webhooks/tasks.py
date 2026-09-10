@@ -249,10 +249,13 @@ def process_incoming_message(
             return
 
         # ── 4.5. Media Persistence (Rasm/Audio Saqlash Pipeline) ────────
-        # Webhook payload'da media url bo'lsa fonda saqlash taskini chaqiramiz
+        # Webhook payload'da media url yoki Telegram voice bo'lsa fonda
+        # saqlash taskini chaqiramiz
         if raw_payload and isinstance(raw_payload, dict):
-            attachments = raw_payload.get("message", {}).get("attachments", [])
-            if attachments or raw_payload.get("media_url"):
+            inner_message = raw_payload.get("message", {})
+            has_attachments = bool(inner_message.get("attachments"))
+            has_voice = bool(inner_message.get("voice"))
+            if has_attachments or has_voice or raw_payload.get("media_url"):
                 try:
                     download_and_store_chat_media.delay(str(chat_message.id))
                 except Exception as e:
@@ -539,27 +542,58 @@ def _update_retry_count(store_id, message_id, platform, retry_count, error):
 def download_and_store_chat_media(self, chat_message_id: str):
     """
     Instagram/Telegram birikmalarining media havolalarini (Meta CDN) yuklab olib,
-    mahalliy storage'ga saqlaydi va ChatMessage.media_url maydonini yangilaydi.
+    mahalliy storage'ga saqlaydi va ChatMessage.media_url (yoki Telegram ovozli
+    xabarlar uchun audio_url) maydonini yangilaydi.
     """
     from apps.chat.models import ChatMessage
-    from apps.chat.services import download_and_save_media_file
+    from apps.chat.services import download_and_save_media_file, resolve_telegram_file_url
 
     try:
-        msg = ChatMessage.objects.filter(id=chat_message_id).first()
+        msg = ChatMessage.objects.select_related("store").filter(id=chat_message_id).first()
         if not msg:
             logger.warning(f"[Media Task] Xabar topilmadi: {chat_message_id}")
             return
 
+        raw = msg.raw_payload if isinstance(msg.raw_payload, dict) else {}
+        inner_message = raw.get("message", {})
+
+        # ── Telegram ovozli xabar (voice) ───────────────────────────
+        # ⚠️ BUG FIX: Avval Telegram voice xabarlarining file_id'si
+        # parsers.py'da o'qib olinib DARHOL TASHLAB YUBORILARDI — hech
+        # qachon haqiqiy audio fayl yuklab olinmas, ChatMessage.audio_url
+        # doim bo'sh qolardi. Operator faqat "🎙️ Ovozli xabar (Ns)" matn
+        # placeholder'ini ko'rar, mijozning haqiqiy ovozli xabarini
+        # eshita olmasdi. Endi getFile API orqali haqiqiy fayl yuklanadi.
+        voice = inner_message.get("voice")
+        if msg.platform == "telegram" and voice and voice.get("file_id"):
+            file_url = resolve_telegram_file_url(msg.store.tg_bot_token, voice["file_id"])
+            if not file_url:
+                logger.warning(
+                    f"[Media Task] Telegram voice file URL topilmadi: msg_id={chat_message_id}"
+                )
+                return
+
+            saved_url = download_and_save_media_file(media_url=file_url, media_type="audio")
+            if saved_url:
+                duration = voice.get("duration", 0)
+                msg.audio_url = saved_url
+                msg.audio_duration = f"{duration // 60}:{duration % 60:02d}"
+                msg.save(update_fields=["audio_url", "audio_duration", "updated_at"])
+                logger.info(
+                    f"[Media Task] Telegram ovozli xabar saqlandi va "
+                    f"ChatMessage.audio_url yangilandi: msg_id={chat_message_id} | url={saved_url}"
+                )
+            return
+
+        # ── Instagram media (rasm/video/audio attachment) ───────────
         media_url = None
         media_type = "image"
 
-        # Raw payload'dan attachment URL'ni olamiz
-        if msg.raw_payload and isinstance(msg.raw_payload, dict):
-            attachments = msg.raw_payload.get("message", {}).get("attachments", [])
-            if attachments:
-                att = attachments[0]
-                media_type = att.get("type", "image")
-                media_url = att.get("payload", {}).get("url")
+        attachments = inner_message.get("attachments", [])
+        if attachments:
+            att = attachments[0]
+            media_type = att.get("type", "image")
+            media_url = att.get("payload", {}).get("url")
 
         if not media_url and msg.content and msg.content.startswith("http"):
             media_url = msg.content
