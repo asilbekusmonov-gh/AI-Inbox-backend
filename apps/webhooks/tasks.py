@@ -211,10 +211,24 @@ def process_incoming_message(
                     logger.warning(f"[Task] Menu button o'rnatishda xato: {e}")
             else:
                 logger.info("[Task] Mijoz /start keldi -> TWA tugmasiz do'rtona qutlov yuborilmoqda")
+
+                # ⚠️ BUG FIX: avval bu matn har doim e-commerce'ga xos
+                # ("mahsulotlar, razmerlar, yetkazib berish") so'zlar bilan
+                # qattiq yozilgan edi — Education yoki Services turidagi
+                # do'konlarda ham xuddi shu matn chiqib, mos kelmasdi
+                # (masalan o'quv markazi uchun "razmer" ma'nosiz). Endi
+                # do'konning category_type'iga qarab mos matn tanlanadi.
+                category = getattr(store, "category_type", "e_commerce") or "e_commerce"
+                category_intros = {
+                    "e_commerce": "Katalogimizdagi mahsulotlar, razmerlar, narxlar va yetkazib berish bo'yicha savolingiz bo'lsa",
+                    "education": "Kurslarimiz, dars jadvali, narxlar va Bepul Sinov Darsi bo'yicha savolingiz bo'lsa",
+                    "services": "Xizmatlarimiz, ustalarimiz, narxlar va vaqt band qilish bo'yicha savolingiz bo'lsa",
+                }
+                intro = category_intros.get(category, category_intros["e_commerce"])
+
                 customer_text = (
                     f"<b>Assalomu alaykum! {store.name} rasmiy sotuv botiga xush kelibsiz! 😊</b>\n\n"
-                    f"Katalogimizdagi mahsulotlar, razmerlar, narxlar va yetkazib berish bo'yicha savolingiz bo'lsa, "
-                    f"shunchaki xabaringizni yozing. AI sotuvchimiz yordam beradi."
+                    f"{intro}, shunchaki xabaringizni yozing. AI sotuvchimiz yordam beradi."
                 )
                 send_telegram_message(
                     bot_token=store.tg_bot_token,

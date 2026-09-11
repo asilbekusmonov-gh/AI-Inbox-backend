@@ -20,6 +20,7 @@ import time
 from urllib.parse import unquote
 
 from django.conf import settings
+from django.core.cache import cache
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 
@@ -114,21 +115,33 @@ class TelegramInitDataAuthentication(BaseAuthentication):
             raise AuthenticationFailed("initData da user.id topilmadi")
 
         # 6. Bu Telegram ID ga ega do'konni topish (do'kon egasi)
-        try:
-            store = Store.objects.select_related("owner").get(
-                tg_owner_chat_id=telegram_user_id,
-                is_active=True,
-                is_deleted=False,
-            )
-        except Store.DoesNotExist:
-            logger.warning(
-                f"TelegramInitData: Telegram ID={telegram_user_id} ga do'kon bog'lanmagan. "
-                f"Avval do'konni ro'yxatdan o'tkazing va tg_owner_chat_id ni to'ldiring."
-            )
-            raise AuthenticationFailed(
-                f"Bu Telegram akkaunt ({telegram_user_id}) hech qanday do'konga bog'lanmagan. "
-                "Iltimos, admin bilan bog'laning."
-            )
+        #
+        # ⚠️ OPTIMIZATION: TWA dashboard har 3 soniyada poll qiladi va har
+        # bir amal (buyurtma ochish, xabar yozish va h.k.) ham shu auth
+        # klassidan o'tadi — ya'ni bu DB so'rovi HAR BIR TWA so'rovida
+        # bajarilardi. Do'kon ma'lumotlari kamdan-kam o'zgargani uchun
+        # (ega, tg_owner_chat_id, is_active) qisqa muddatli Redis kesh
+        # bilan bu so'rovni deyarli butunlay bazadan olib tashlaymiz.
+        cache_key = f"store_by_tgowner:{telegram_user_id}"
+        store = cache.get(cache_key)
+
+        if store is None:
+            try:
+                store = Store.objects.select_related("owner").get(
+                    tg_owner_chat_id=telegram_user_id,
+                    is_active=True,
+                    is_deleted=False,
+                )
+                cache.set(cache_key, store, timeout=20)
+            except Store.DoesNotExist:
+                logger.warning(
+                    f"TelegramInitData: Telegram ID={telegram_user_id} ga do'kon bog'lanmagan. "
+                    f"Avval do'konni ro'yxatdan o'tkazing va tg_owner_chat_id ni to'ldiring."
+                )
+                raise AuthenticationFailed(
+                    f"Bu Telegram akkaunt ({telegram_user_id}) hech qanday do'konga bog'lanmagan. "
+                    "Iltimos, admin bilan bog'laning."
+                )
 
         logger.debug(f"TelegramInitData auth OK: store='{store.name}', tg_id={telegram_user_id}")
         # request.user = store.owner (Django User)

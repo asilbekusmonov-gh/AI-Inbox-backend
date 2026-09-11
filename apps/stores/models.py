@@ -131,7 +131,12 @@ class Store(BaseModel):
         help_text="AI kreativlik darajasi (0.0 — aniq, 1.0 — ijodiy)"
     )
     ai_max_tokens = models.IntegerField(
-        default=1000,
+        # ⚠️ BUG FIX: 1000 token bilan uzun sotuv matni + oxiridagi lid/buyurtma
+        # JSON bloki ba'zan sig'may qolib, javob JSON o'rtasida kesilib ketardi —
+        # bu esa kesilgan JSON mijozga xom (tozalanmagan) holda ko'rinishiga
+        # olib kelgan edi (jonli testda kuzatildi). 1500 token qo'shimcha
+        # zaxira beradi.
+        default=1500,
         help_text="AI javobining maksimal uzunligi (token)"
     )
 

@@ -15,6 +15,7 @@ import json
 import logging
 import httpx
 from django.conf import settings
+from django.core.cache import cache
 
 from django.http import HttpResponse, JsonResponse
 from django.views import View
@@ -185,12 +186,24 @@ class TelegramWebhookView(View):
 
     def _get_store_by_token(self, bot_token: str) -> Store | None:
         """Bot token bo'yicha aktiv do'konni topadi"""
+        # ⚠️ OPTIMIZATION: bu DB so'rovi HAR BIR kelgan Telegram xabarida
+        # bajarilardi. Do'konlar ro'yxati kamdan-kam o'zgargani uchun
+        # qisqa muddatli kesh bilan xabarlar ko'payib ketganda ham
+        # bazaga ortiqcha yuk tushmaydi.
+        cache_key = f"store_by_bottoken:{bot_token}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         try:
-            return Store.objects.select_related("owner").filter(
+            store = Store.objects.select_related("owner").filter(
                 tg_bot_token=bot_token,
                 is_active=True,
                 is_deleted=False,
             ).order_by("-updated_at", "-created_at").first()
+            if store:
+                cache.set(cache_key, store, timeout=20)
+            return store
         except Exception as e:
             logger.error(f"Do'konni topishda xato: {e}", exc_info=True)
             return None

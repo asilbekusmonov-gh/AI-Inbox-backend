@@ -359,13 +359,22 @@ class ChatThreadListView(APIView):
         if not target_store:
             return Response([], status=status.HTTP_200_OK)
 
-        # All non-deleted messages for this store, ordered chronologically
-        messages = (
+        # ⚠️ BUG FIX (scale): avval BUTUN do'kon tarixidagi barcha xabarlar
+        # (necha oylik, necha minglab bo'lsa ham) HAR SO'ROVDA — ya'ni
+        # frontend'ning 3 soniyalik pollingi tufayli amalda HAR 3 SONIYADA —
+        # bazadan o'qib, Python'da qayta guruhlanardi. Mijozlar va xabarlar
+        # ko'paygan sari bu so'rov sekinlashib, butun TWA "qotib qolgandek"
+        # tuyulishiga olib kelardi. Endi faqat so'nggi N ta xabar (eng faol
+        # suhbatlar) olinadi — inbox ro'yxati aylanma emas, "so'nggi faollik"
+        # ko'rinishi bo'lgani uchun bu to'g'ri xulq-atvor ham hisoblanadi.
+        RECENT_MESSAGE_LIMIT = 500
+        recent_messages = list(
             ChatMessage.objects
             .filter(store=target_store, is_deleted=False)
             .select_related("customer")
-            .order_by("created_at")
+            .order_by("-created_at")[:RECENT_MESSAGE_LIMIT]
         )
+        messages = reversed(recent_messages)  # guruhlash tartibi eskidan-yangiga bo'lishi kerak
 
         # Group by customer
         threads_map = {}
