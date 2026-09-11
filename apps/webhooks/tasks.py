@@ -43,6 +43,7 @@ def process_incoming_message(
     text: str,
     chat_id: str,
     raw_payload: dict,
+    sender_display_name: str = "",
 ):
     """
     Webhook'dan qabul qilingan xabarni qayta ishlaydi.
@@ -83,9 +84,22 @@ def process_incoming_message(
             platform=platform,
             platform_user_id=sender_id,
             username=sender_username,
+            display_name=sender_display_name,
         )
         if is_new_customer:
             logger.info(f"[Task] Yangi mijoz: {customer}")
+
+        # ⚠️ BUG FIX: avval mijozning haqiqiy ismi (Telegram profilidagi
+        # first_name+last_name) HECH QACHON alohida saqlanmasdi — faqat
+        # @username `Customer.username`ga yozilardi, `full_name` esa faqat
+        # (agar umuman ishlasa ham) buyurtma yaratilgandan keyingina
+        # to'ldirilardi. Natijada Inbox'da ismi o'rniga @username (masalan
+        # "f6jbq") chiqib qolardi. Endi profildagi ism mavjud bo'lsa va
+        # `full_name` hali bo'sh bo'lsa, HAR BIR xabarda (buyurtma kutmasdan)
+        # darhol to'ldiriladi.
+        if sender_display_name and not customer.full_name:
+            customer.full_name = sender_display_name
+            customer.save(update_fields=["full_name", "updated_at"])
 
         # ── 3. Xabarni DB'ga saqlash (idempotency) ────────────────────
         chat_message, msg_created = ChatMessage.all_objects.get_or_create(

@@ -45,6 +45,10 @@ class IncomingMessage:
     # ── Bot token (qaysi do'konning boti ekanini aniqlash uchun) ──
     bot_token_hint: Optional[str] = None
 
+    # Profildagi haqiqiy ism-familya (masalan Telegram first_name+last_name) —
+    # @username'dan farqli, mijozning Inbox'da chiroyli ko'rinishi uchun
+    sender_display_name: str = ""
+
 
 # ─────────────────────────────────────────────────────────────
 # TELEGRAM PARSER
@@ -100,13 +104,25 @@ def parse_telegram_payload(payload: dict) -> Optional[IncomingMessage]:
 
         message_id = str(message.get("message_id", ""))
         chat_id = str(message.get("chat", {}).get("id", sender_id))
-        username = sender.get("username", "") or sender.get("first_name", "")
+
+        # ⚠️ BUG FIX: avval @username bo'lmasa, "ism" ("first_name")
+        # to'g'ridan-to'g'ri `username` maydoniga solib qo'yilardi — bu
+        # ikkalasini bir-biriga aralashtirib yuborardi. Natijada mijozning
+        # haqiqiy ismi hech qachon alohida saqlanmasdi (faqat @username,
+        # yoki @username yo'q bo'lsa "ism" username sifatida) — Inbox'da
+        # ismi o'rniga @username (masalan "f6jbq") chiqib qolardi. Endi
+        # ikkalasi alohida ajratiladi.
+        username = sender.get("username", "") or ""
+        first_name = sender.get("first_name", "") or ""
+        last_name = sender.get("last_name", "") or ""
+        display_name = f"{first_name} {last_name}".strip()
 
         return IncomingMessage(
             platform="telegram",
             message_id=message_id,
             sender_id=sender_id,
             sender_username=username,
+            sender_display_name=display_name,
             text=text,
             chat_id=chat_id,
             raw_payload=payload,

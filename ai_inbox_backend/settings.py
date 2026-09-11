@@ -329,6 +329,21 @@ CHAT_MESSAGE_RETENTION_DAYS = int(env("CHAT_MESSAGE_RETENTION_DAYS", default="90
 
 
 # ─────────────────────────────────────────────
+# BROADCAST (OMMAVIY REKLAMA) LIMITLARI
+# ─────────────────────────────────────────────
+# ⚠️ XAVFSIZLIK: bot BARCHA do'konlar uchun BITTA umumiy Telegram bot
+# orqali ishlaydi. Agar bitta do'kon ortiqcha ko'p/tez-tez broadcast
+# yuborsa va mijozlar buni spam deb Telegram'ga shikoyat qilsa, Telegram
+# BUTUN botni cheklashi mumkin — bu bitta beparvo do'kon tufayli BARCHA
+# do'konlarning mijozlarga yeta olmay qolishiga olib keladi. Shu sabab
+# har bir do'kon uchun qat'iy kunlik/haftalik limit qo'yilgan. Kerak
+# bo'lsa shu ikkita raqamni bu yerda o'zgartirish kifoya — boshqa hech
+# qanday kodga tegish shart emas.
+BROADCAST_DAILY_LIMIT_PER_STORE = int(env("BROADCAST_DAILY_LIMIT_PER_STORE", default="1"))
+BROADCAST_WEEKLY_LIMIT_PER_STORE = int(env("BROADCAST_WEEKLY_LIMIT_PER_STORE", default="3"))
+
+
+# ─────────────────────────────────────────────
 # PASSWORD VALIDATION
 # ─────────────────────────────────────────────
 AUTH_PASSWORD_VALIDATORS = [

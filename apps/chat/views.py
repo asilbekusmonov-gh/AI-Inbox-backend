@@ -306,6 +306,36 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
         from apps.chat.models import BroadcastCampaign
         from apps.chat.tasks import send_broadcast_message_task
 
+        # ⚠️ XAVFSIZLIK: bot barcha do'konlar uchun BITTA umumiy Telegram
+        # bot orqali ishlaydi — agar bitta do'kon haddan tashqari ko'p/
+        # tez-tez broadcast yuborsa, mijozlar buni spam deb shikoyat
+        # qilishi va Telegram BUTUN botni cheklab qo'yishi mumkin. Bu esa
+        # bitta beparvo do'kon tufayli BARCHA do'konlarning mijozlarga
+        # yeta olmay qolishiga olib keladi. Shu sabab har bir do'kon uchun
+        # kunlik/haftalik qat'iy limit qo'yilgan (ai_inbox_backend/
+        # settings.py'dagi BROADCAST_DAILY_LIMIT_PER_STORE/_WEEKLY_).
+        from django.conf import settings as dj_settings
+        from django.utils import timezone
+        from datetime import timedelta
+
+        now = timezone.now()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = now - timedelta(days=7)
+
+        daily_count = BroadcastCampaign.objects.filter(store=target_store, created_at__gte=today_start).count()
+        if daily_count >= dj_settings.BROADCAST_DAILY_LIMIT_PER_STORE:
+            return Response(
+                {"error": f"Kunlik broadcast limiti ({dj_settings.BROADCAST_DAILY_LIMIT_PER_STORE} ta) tugadi. Ertaga qayta urinib ko'ring."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        weekly_count = BroadcastCampaign.objects.filter(store=target_store, created_at__gte=week_start).count()
+        if weekly_count >= dj_settings.BROADCAST_WEEKLY_LIMIT_PER_STORE:
+            return Response(
+                {"error": f"Haftalik broadcast limiti ({dj_settings.BROADCAST_WEEKLY_LIMIT_PER_STORE} ta) tugadi. Keyinroq qayta urinib ko'ring."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
         active_customers = Customer.objects.filter(
             store=target_store,
             is_blocked=False,

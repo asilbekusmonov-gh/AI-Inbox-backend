@@ -107,6 +107,7 @@ class Customer(BaseModel):
         platform: str,
         platform_user_id: str,
         username: str = None,
+        display_name: str = None,
     ) -> tuple["Customer", bool]:
         """
         Platformadan kelgan mijozni topadi yoki yangi yaratadi.
@@ -115,11 +116,16 @@ class Customer(BaseModel):
         Returns:
             (Customer, created: bool)
         """
+        # ⚠️ BUG FIX: avval `full_name` yangi mijoz yaratilganda ham
+        # hech qachon o'rnatilmasdi (faqat `username`) — shu sabab Inbox'da
+        # ismi o'rniga @username chiqib qolardi. Endi profildagi ism
+        # (display_name) mavjud bo'lsa, yangi mijoz uchun boshidanoq
+        # `full_name`ga yoziladi.
         return cls.objects.get_or_create(
             store=store,
             platform=platform,
             platform_user_id=str(platform_user_id),
-            defaults={"username": username},
+            defaults={"username": username, "full_name": display_name or None},
         )
 
 
