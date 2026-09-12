@@ -66,6 +66,18 @@ class StoreConfigUpdateSerializer(serializers.ModelSerializer):
     """
     class Meta:
         model = Store
+        # ⚠️ XAVFSIZLIK TUZATISHI: "tg_bot_token" va "tg_owner_chat_id"
+        # avval shu ro'yxatda edi — ya'ni istalgan do'kon egasi PATCH
+        # /api/v1/store/ orqali BEVOSITA bu maydonlarni o'zgartira olardi.
+        # "tg_owner_chat_id"da unique cheklov yo'q edi, shuning uchun
+        # bitta do'kon ega ataylab BOSHQA (haqiqiy) do'kon egasining
+        # Telegram ID'sini kiritsa, o'sha haqiqiy ega TelegramInitData
+        # autentifikatsiyasida "MultipleObjectsReturned" xatosi bilan
+        # o'z paneliga kira olmay qolar edi (cross-tenant DoS). Bu ikki
+        # maydon faqat tizim ichki oqimlari orqali (masalan admin_<uuid>
+        # havolasini bosish) o'rnatilishi kerak — do'kon egasi tomonidan
+        # ochiq API orqali ozgartirilmasligi kerak, shuning uchun
+        # butunlay ro'yxatdan olib tashlandi.
         fields = [
             "name",
             "description",
@@ -75,13 +87,10 @@ class StoreConfigUpdateSerializer(serializers.ModelSerializer):
             "ai_system_prompt",
             "ai_model",
             "ai_temperature",
-            "tg_bot_token",
-            "tg_owner_chat_id",
             "ig_page_id",
             "ig_access_token",
         ]
         extra_kwargs = {
-            "tg_bot_token": {"write_only": True},
             "ig_access_token": {"write_only": True},
         }
 

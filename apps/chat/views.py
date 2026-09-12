@@ -421,6 +421,10 @@ class ChatThreadListView(APIView):
                         or cust.username
                         or f"Mijoz #{cust.platform_user_id}"
                     ),
+                    # Telegram profiliga havola faqat @username orqali
+                    # ishlaydi (Telegram maxfiylik siyosati sababli
+                    # raqamli ID orqali tashqi havola yaratib bo'lmaydi)
+                    "customer_username": cust.username or "",
                     "customer_phone": cust.phone_number or "",
                     "platform": cust.platform,
                     "avatar_url": None,

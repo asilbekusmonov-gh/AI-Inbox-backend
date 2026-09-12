@@ -181,10 +181,24 @@ def get_store_from_request(request):
     Ustuvorlik tartibi:
     1. request.auth — TelegramInitDataAuthentication o'rnatgan Store
     2. request.user.store — JWT orqali autentifikatsiya bo'lgan egasi
-    3. X-Store-ID header — muqobil (ixtiyoriy)
-    4. Hech narsa topilmasa — None qaytaradi (view 401 qaytarishi kerak!)
+    3. Hech narsa topilmasa — None qaytaradi (view 401/bo'sh natija qaytarishi kerak!)
 
     ⚠️  .first() fallback ataylab o'chirilgan — xavfsizlik uchun!
+
+    ⚠️ XAVFSIZLIK TUZATISHI (KRITIK): avval bu yerda 3-fallback sifatida
+    "X-Store-ID" header/`store_id` query param qabul qilinardi — va u
+    berilgan store_id egasi so'rov yuborayotgan foydalanuvchi ekanini
+    HECH QACHON tekshirmasdi. Natijada: `.store`ga ega bo'lmagan (masalan
+    `createsuperuser` orqali yaratilgan admin akkaunt, yoki do'koni
+    soft-delete qilingan sobiq ega) HAR QANDAY haqiqiy JWT bilan
+    autentifikatsiyadan o'tgan foydalanuvchi shunchaki
+    `X-Store-ID: <istalgan-do'kon-uuid>` header qo'shib, O'SHA DO'KONNING
+    buyurtmalari, mahsulotlari, mijozlari, sozlamalari va suhbatlariga
+    TO'LIQ CRUD huquqi bilan kira olardi — chunki bu header faqat
+    "shu ID'li do'kon mavjudmi" ni tekshirardi, "so'rovchi shu do'konga
+    tegishlimi" ni emas. Bu authentifikatsiyani chetlab o'tish (bypass)
+    edi, shuning uchun butunlay olib tashlandi. Hech qanday joyda
+    (frontend, ichki xizmatlar) bu headerga tayanilmagani tasdiqlandi.
     """
     from apps.stores.models import Store
 
@@ -199,16 +213,6 @@ def get_store_from_request(request):
         if store and not store.is_deleted:
             return store
 
-    # 3. X-Store-ID header (ixtiyoriy — faqat xavfsiz muhitda)
-    store_id = (
-        request.headers.get("X-Store-ID")
-        or request.query_params.get("store_id")
-    )
-    if store_id:
-        try:
-            return Store.objects.get(id=store_id, is_active=True, is_deleted=False)
-        except (Store.DoesNotExist, ValueError):
-            pass
-
-    # ❌ Hech narsa topilmadi — None qaytaradi (FALLBACK .first() YO'Q!)
+    # ❌ Hech narsa topilmadi — None qaytaradi (FALLBACK .first() YO'Q,
+    # X-Store-ID FALLBACK ham YO'Q!)
     return None

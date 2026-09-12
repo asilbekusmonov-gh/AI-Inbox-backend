@@ -202,3 +202,25 @@ class Order(BaseModel):
                     product.save(update_fields=["stock", "updated_at"])
                 except (Product.DoesNotExist, ValueError):
                     pass
+
+    def _deduct_stock_items(self):
+        """
+        Buyurtma yaratilganda mos mahsulotlarning ombordagi sonini
+        kamaytiradi (`_restock_items()` bilan simmetrik juftlik —
+        bekor qilinganda qaytaradi, yaratilganda kamaytiradi).
+        Stok 0 dan pastga tushmaydi (himoya).
+        """
+        from apps.products.models import Product
+        if not self.items or not isinstance(self.items, list):
+            return
+
+        for item in self.items:
+            prod_id = item.get("id") or item.get("product_id")
+            qty = item.get("qty") or item.get("quantity") or 1
+            if prod_id:
+                try:
+                    product = Product.objects.get(id=prod_id, store=self.store)
+                    product.stock = max(0, product.stock - int(qty))
+                    product.save(update_fields=["stock", "updated_at"])
+                except (Product.DoesNotExist, ValueError):
+                    pass

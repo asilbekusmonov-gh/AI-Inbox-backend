@@ -72,9 +72,9 @@ class TelegramWebhookView(View):
             # Telegram'ga 200 qaytaramiz — aks holda qayta-qayta yuboradi!
             return HttpResponse(status=200)
 
-        # 3. Do'konni bot_token orqali topamiz
-        store = self._get_store_by_token(bot_token)
-        if not store:
+        # 3. Do'konni bot_token orqali topamiz (bot haqiqiy va faolligini tekshirish uchun)
+        token_store = self._get_store_by_token(bot_token)
+        if not token_store:
             logger.warning(
                 f"Telegram: do'kon topilmadi | token: {bot_token[:10]}..."
             )
@@ -87,7 +87,43 @@ class TelegramWebhookView(View):
             return HttpResponse(status=200)
 
         # 4.5 Single Master Bot Multi-Tenant Routing (Deep-link & Session Router)
-        store = self._resolve_store_for_message(store, message)
+        store = self._resolve_store_for_message(message)
+
+        # ⚠️ XAVFSIZLIK: hech qanday do'konga aniq bog'lanmagan (havolasiz/
+        # sessiyasiz kirgan BEGONA) foydalanuvchini ENDI hech qanday real
+        # do'konning "mijozi" sifatida ro'yxatga olmaymiz — buning o'rniga
+        # muloyim yo'naltiruvchi xabar yuboramiz va to'xtaymiz.
+        if store is None:
+            from apps.chat.senders import send_telegram_message
+            send_telegram_message(
+                bot_token=bot_token,
+                chat_id=message.chat_id,
+                text=(
+                    "Assalomu alaykum! 😊 Bu bot faqat maxsus taklif havolasi orqali ishlaydi. "
+                    "Agar sizni biror do'kon/kurs markazi shu botga yo'naltirgan bo'lsa, "
+                    "ular yuborgan havoladan (link) qayta foydalaning."
+                ),
+            )
+            logger.info(
+                f"Telegram: begona foydalanuvchi (havolasiz) — hech qaysi do'konga biriktirilmadi | "
+                f"sender_id={message.sender_id}"
+            )
+            return HttpResponse(status=200)
+
+        # 4.6 Idempotency: Telegram bir xil update'ni bir necha marta qayta
+        # yuborishi mumkin (webhook sekin javob bersa yoki tarmoq xatosida).
+        #
+        # ⚠️ BUG FIX: bu tekshiruv (`_is_duplicate`) allaqachon yozilgan va
+        # Instagram oqimida ishlatilgan edi, lekin Telegram oqimida HECH
+        # QACHON chaqirilmagan (o'lik kod) — ya'ni har bir qayta yuborilgan
+        # (retry) xabar navbatga qayta-qayta qo'shilib, keyingi bosqichda
+        # (process_incoming_message) poyga sharoiti (race condition)
+        # orqali ikkilangan javob/Gemini chaqiruvlariga olib kelishi mumkin
+        # edi. Endi Instagram bilan bir xil, navbatga qo'shishdan OLDIN
+        # tekshiriladi.
+        if self._is_duplicate(store.id, message):
+            logger.info(f"Telegram: dublikat xabar, o'tkazib yuborildi | msg_id={message.message_id}")
+            return HttpResponse(status=200)
 
         # 5. Celery navbatiga jo'natamiz (ASYNCHRONOUS!)
         try:
@@ -117,16 +153,26 @@ class TelegramWebhookView(View):
                 f"Celery navbatga qo'shishda xato: {e}",
                 exc_info=True,
             )
-            # Celery ishlamasa ham Telegram'ga 200 qaytaramiz
-            # (Sentry bu xatoni ushlab qoladi)
+            # ⚠️ BUG FIX: avval bu yerda ham Telegram'ga 200 qaytarilardi —
+            # ya'ni Redis/Celery broker vaqtincha ishlamay qolsa (masalan
+            # qisqa muddatli tarmoq uzilishi), xabar HECH QAYERDA
+            # saqlanmasdan, Telegram esa "muvaffaqiyatli yetkazildi" deb
+            # HECH QACHON qayta urinib ko'rmasdan, butunlay yo'qolib
+            # ketardi. Endi 500 qaytariladi — Telegram buni ko'rib, keyingi
+            # daqiqalarda avtomatik qayta yuboradi (broker tiklanguncha).
+            return HttpResponse(status=500)
 
-        # 7. Telegram 200 kutadi — doim 200 qaytaramiz
+        # 7. Telegram 200 kutadi — muvaffaqiyatli navbatga qo'yilgach 200 qaytaramiz
         return HttpResponse(status=200)
 
-    def _resolve_store_for_message(self, default_store: Store, message) -> Store:
+    def _resolve_store_for_message(self, message) -> Store | None:
         """
         Single Master Bot Model uchun:
         /start store_123 deep-linki yoki foydalanuvchining aktiv do'kon sessiyasi bo'yicha dinamik yo'naltiradi.
+
+        Returns:
+            Store — deep-link yoki mavjud sessiya orqali aniq topildi
+            None  — hech qanday havola/sessiya yo'q (begona/tasodifiy kirgan foydalanuvchi)
         """
         from apps.customers.models import CustomerSession
         from django.db.models import Q
@@ -183,7 +229,18 @@ class TelegramWebhookView(View):
         if sess:
             return sess.active_store
 
-        return default_store
+        # ⚠️ XAVFSIZLIK/IZOLYATSIYA TUZATISHI: avval bu yerda hech qanday
+        # havola yoki sessiyasi bo'lmagan (masalan botni tasodifan yoki
+        # username orqali topib kirgan BEGONA) foydalanuvchi jimgina
+        # `default_store`ga (bot_token bo'yicha topilgan — Single Master
+        # Bot arxitekturasida BARCHA do'konlar bitta tokenni ishlatgani
+        # uchun bu amalda "eng so'nggi yangilangan do'kon" degani)
+        # biriktirilib qo'yilardi. Ya'ni tasodifiy kishi hech narsa
+        # so'ramasdan turib biror REAL do'konning "mijozi" bo'lib qolardi
+        # — bu do'konning AI byudjetini isrof qilardi va uning Inbox'ini
+        # keraksiz suhbatlar bilan to'ldirardi. Endi bunday holatda HECH
+        # QANDAY do'konga biriktirilmaydi (None qaytariladi).
+        return None
 
     def _get_store_by_token(self, bot_token: str) -> Store | None:
         """Bot token bo'yicha aktiv do'konni topadi"""

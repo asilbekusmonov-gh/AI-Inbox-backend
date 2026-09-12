@@ -228,13 +228,28 @@ def _format_order_notification(order) -> str:
     if order.total_amount:
         total_text = f"\n💰 <b>Jami:</b> {order.total_amount:,} so'm"
 
+    # ⚠️ BUG FIX: avval "📍 Manzil:" qatori har doim, hatto bo'sh bo'lsa
+    # ham chiqib turardi. Ta'lim/Xizmat toifasidagi buyurtmalarda (AI
+    # manzil so'ramaydi, chunki kurs/xizmat uchun bu tushuncha yo'q)
+    # bu qator har doim bo'sh ko'rinib, tushunarsiz edi. Endi faqat
+    # haqiqiy manzil bo'lsa ko'rsatiladi.
+    address_text = f"📍 <b>Manzil:</b> {order.delivery_address}\n" if order.delivery_address else ""
+
+    # Mijozning Telegram @username'i (bo'lsa) — egasi mijozning shaxsiy
+    # profiliga tezroq o'tishi uchun.
+    username_text = ""
+    customer = getattr(order, "customer", None)
+    if customer and getattr(customer, "username", None):
+        username_text = f"🔗 <b>Telegram:</b> @{customer.username}\n"
+
     return (
         f"🛍 <b>YANGI BUYURTMA!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📋 <b>Raqam:</b> {order.order_number}\n"
         f"👤 <b>Mijoz:</b> {order.customer_full_name}\n"
+        f"{username_text}"
         f"📞 <b>Tel:</b> {order.customer_phone}\n"
-        f"📍 <b>Manzil:</b> {order.delivery_address}\n"
+        f"{address_text}"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🛒 <b>Mahsulotlar:</b>\n{items_text}"
         f"{total_text}\n"

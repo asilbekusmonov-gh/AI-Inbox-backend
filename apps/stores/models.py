@@ -104,6 +104,15 @@ class Store(BaseModel):
         max_length=50,
         blank=True,
         null=True,
+        unique=True,
+        # ⚠️ XAVFSIZLIK: bu maydonda avval unique cheklov yo'q edi — ikki
+        # do'kon bir xil qiymatga ega bo'lsa, TelegramInitDataAuthentication
+        # (apps/core/authentication.py) `.get(tg_owner_chat_id=...)` chaqirib,
+        # `MultipleObjectsReturned` bilan qulab, haqiqiy do'kon egasini o'z
+        # paneliga kira olmay qolishiga (cross-tenant DoS) sabab bo'lardi.
+        # NULL qiymatlar (hali hech kim ulanmagan do'konlar) bundan
+        # mustasno — faqat haqiqiy (bo'sh bo'lmagan) qiymatlar orasida
+        # takrorlanishning oldi olinadi.
         help_text="Do'kon egasining shaxsiy Telegram chat_id (xabarnoma uchun)"
     )
 

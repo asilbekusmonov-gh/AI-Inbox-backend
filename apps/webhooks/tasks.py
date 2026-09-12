@@ -23,6 +23,45 @@ from django.conf import settings
 logger = logging.getLogger("apps.webhooks")
 
 
+def _send_command_reply(store, customer, platform, chat_id, text, parse_mode="HTML", reply_markup=None):
+    """
+    Buyruq (/start, /dashboard, /help) javobini yuboradi VA uni
+    ChatMessage sifatida (role=ASSISTANT) saqlaydi.
+
+    ⚠️ BUG FIX: avval bu turdagi statik javoblar faqat Telegram'ga
+    to'g'ridan-to'g'ri yuborilardi, bazaga HECH QACHON yozilmasdi.
+    ChatThreadListView'dagi "unread_count" esa aynan "oxirgi ASSISTANT
+    xabaridan keyingi USER xabarlari soni" formulasi bilan hisoblanadi —
+    demak mijoz "/start" yozganda, bot chiroyli javob bergan bo'lsa ham,
+    bazada bu ko'rinmagani uchun hisoblagich HECH QACHON nolga
+    tushmasdi. Natijada TWA Inbox'da "N ta yangi" belgisi mijoz
+    xabarini ochib o'qigandan keyin ham, hatto sahifani yangilagandan
+    keyin ham DOIM qaytib chiqaverardi (jonli testda tasdiqlandi).
+    """
+    from apps.chat.senders import send_telegram_message
+    from apps.chat.models import ChatMessage
+    import uuid
+
+    sent = send_telegram_message(
+        bot_token=store.tg_bot_token,
+        chat_id=chat_id,
+        text=text,
+        parse_mode=parse_mode,
+        reply_markup=reply_markup,
+    )
+    if sent and customer is not None:
+        ChatMessage.objects.create(
+            store=store,
+            customer=customer,
+            message_id=f"cmd_reply_{uuid.uuid4().hex[:10]}",
+            platform=platform,
+            role=ChatMessage.Role.ASSISTANT,
+            content=text,
+            processing_status=ChatMessage.ProcessingStatus.COMPLETED,
+        )
+    return sent
+
+
 @shared_task(
     bind=True,
     name="apps.webhooks.tasks.process_incoming_message",
@@ -138,12 +177,9 @@ def process_incoming_message(
                 if store.tg_owner_chat_id:
                     # Boshqa egaga biriktirilgan — bloklash
                     logger.warning(f"[Security] Begona foydalanuvchi ({sender_id}) admin havolasini ishlatishga urindi: store={store.name}")
-                    from apps.chat.senders import send_telegram_message
-                    send_telegram_message(
-                        bot_token=store.tg_bot_token,
-                        chat_id=chat_id,
+                    _send_command_reply(
+                        store, customer, platform, chat_id,
                         text="🚫 <b>Xavfsizlik ogohlantirishi:</b> Ushbu do'kon allaqachon o'z egasiga biriktirilgan! Siz ushbu do'kon paneliga kira olmaysiz.",
-                        parse_mode="HTML",
                     )
                     ChatMessage.objects.filter(id=chat_message.id).update(
                         processing_status=ChatMessage.ProcessingStatus.COMPLETED
@@ -158,8 +194,6 @@ def process_incoming_message(
 
 
         if cmd_text.startswith("/start") or cmd_text.startswith("/dashboard") or cmd_text in ["start", "dashboard"]:
-            from apps.chat.senders import send_telegram_message
-
             if is_admin:
                 logger.info("[Task] Admin /start keldi -> Dashboard TWA tugmasi yuborilmoqda")
                 welcome_text = (
@@ -192,11 +226,9 @@ def process_incoming_message(
                     ]
                 }
                 logger.info(f"[Task] TWA URL: {twa_url}")
-                send_telegram_message(
-                    bot_token=store.tg_bot_token,
-                    chat_id=chat_id,
+                _send_command_reply(
+                    store, customer, platform, chat_id,
                     text=welcome_text,
-                    parse_mode="HTML",
                     reply_markup=reply_markup,
                 )
 
@@ -244,11 +276,9 @@ def process_incoming_message(
                     f"<b>Assalomu alaykum! {store.name} rasmiy sotuv botiga xush kelibsiz! 😊</b>\n\n"
                     f"{intro}, shunchaki xabaringizni yozing. AI sotuvchimiz yordam beradi."
                 )
-                send_telegram_message(
-                    bot_token=store.tg_bot_token,
-                    chat_id=chat_id,
+                _send_command_reply(
+                    store, customer, platform, chat_id,
                     text=customer_text,
-                    parse_mode="HTML",
                 )
 
             ChatMessage.objects.filter(id=chat_message.id).update(
@@ -264,12 +294,9 @@ def process_incoming_message(
                 f"2. 🛍️ <b>Buyurtma berish</b>: Mahsulot nomini, ismingiz, telefon va manzilingizni yozsangiz AI avtomatik buyurtma oladi.\n"
                 f"3. 📊 <b>Dashboard</b>: Pastdagi tugma orqali do'kon boshqaruv paneliga kiring."
             )
-            from apps.chat.senders import send_telegram_message
-            send_telegram_message(
-                bot_token=store.tg_bot_token,
-                chat_id=chat_id,
+            _send_command_reply(
+                store, customer, platform, chat_id,
                 text=help_text,
-                parse_mode="HTML",
             )
             ChatMessage.objects.filter(id=chat_message.id).update(
                 processing_status=ChatMessage.ProcessingStatus.COMPLETED
@@ -371,18 +398,49 @@ def process_incoming_message(
         )
 
         # ── 5.5. AI javobini DB'ga saqlash ─────────────────────────────
-        ai_message = ChatMessage.objects.create(
+        #
+        # ⚠️ BUG FIX (poyga holati / race condition): avval bu yerda oddiy
+        # `.create()` ishlatilardi. Telegram bir xil update'ni ba'zan qayta
+        # yuborishi (yoki Celery'ning `acks_late=True` sozlamasi worker
+        # o'lib qolganda taskni qayta ishga tushirishi) natijasida IKKI
+        # worker BIR XIL xabarni parallel qayta ishlashi mumkin edi.
+        # `message_id=f"ai_resp_{message_id}"` — har doim bir xil, statik
+        # qiymat bo'lgani uchun, ikkinchi (yutqazgan) worker bazadagi
+        # unique cheklovga (store, message_id, platform) urilib
+        # `IntegrityError` bilan qulardi — bu esa uni 3 marta qayta urinib
+        # ko'rishga (har birida qimmat Gemini so'rovi bilan!) va oxir-
+        # oqibat ALLAQACHON MUVAFFAQIYATLI yakunlangan xabarni FAILED deb
+        # belgilab qo'yishga olib kelardi. Endi `get_or_create` — ikkinchi
+        # worker jimgina "allaqachon bor" deb bilib, hech narsa qilmay
+        # to'xtaydi.
+        ai_message, ai_message_created = ChatMessage.objects.get_or_create(
             store=store,
-            customer=customer,
             message_id=f"ai_resp_{message_id}",
             platform=platform,
-            role=ChatMessage.Role.ASSISTANT,
-            content=ai_response.text,
-            processing_status=ChatMessage.ProcessingStatus.COMPLETED,
-            celery_task_id=self.request.id,
-            tokens_used=ai_response.tokens_used,
-            ai_model_used=ai_response.model_used,
+            defaults={
+                "customer": customer,
+                "role": ChatMessage.Role.ASSISTANT,
+                "content": ai_response.text,
+                "processing_status": ChatMessage.ProcessingStatus.COMPLETED,
+                "celery_task_id": self.request.id,
+                "tokens_used": ai_response.tokens_used,
+                "ai_model_used": ai_response.model_used,
+            },
         )
+
+        if not ai_message_created:
+            # Boshqa worker bu xabarga ALLAQACHON muvaffaqiyatli javob
+            # bergan (poyga holati) — takroriy javob yubormaymiz, takroriy
+            # buyurtma yaratmaymiz, faqat asl xabarni COMPLETED deb
+            # belgilab, jimgina to'xtaymiz.
+            logger.info(
+                f"[Task] AI javobi allaqachon mavjud (poyga holati/retry) — "
+                f"qayta ishlanmadi | msg_id={message_id}"
+            )
+            ChatMessage.objects.filter(id=chat_message.id).update(
+                processing_status=ChatMessage.ProcessingStatus.COMPLETED,
+            )
+            return
 
         # ── 6. Javobni platforma orqali yuborish ──────────────────────
         sent = send_reply(
@@ -528,10 +586,19 @@ def _mark_message_failed(store_id, message_id, platform, error_msg):
     """ChatMessage'ni FAILED deb belgilaydi"""
     try:
         from apps.chat.models import ChatMessage
+        # ⚠️ BUG FIX: avval bu yerda HAR DOIM FAILED deb belgilanardi —
+        # hatto boshqa (parallel) worker o'sha xabarga ALLAQACHON
+        # muvaffaqiyatli javob berib, COMPLETED deb belgilagan bo'lsa
+        # ham! Bu haqiqiy muvaffaqiyatli xabarni FAILED holatga
+        # "qaytarib" (regressiya) qo'yib, egasining dashboard/loglarida
+        # yolg'on xato ko'rsatardi. Endi allaqachon COMPLETED bo'lgan
+        # xabar hech qachon qayta yozilmaydi.
         ChatMessage.all_objects.filter(
             store_id=store_id,
             message_id=message_id,
             platform=platform,
+        ).exclude(
+            processing_status=ChatMessage.ProcessingStatus.COMPLETED,
         ).update(
             processing_status=ChatMessage.ProcessingStatus.FAILED,
             error_message=error_msg[:500],

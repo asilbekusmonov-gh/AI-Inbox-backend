@@ -66,11 +66,29 @@ def verify_instagram_signature(request) -> bool:
         True — haqiqiy Meta so'rovi
         False — soxta yoki buzilgan so'rov
     """
+    # ⚠️ XAVFSIZLIK TUZATISHI: avval META_APP_SECRET sozlanmagan bo'lsa,
+    # bu funksiya "dev rejimi" deb HAR DOIM True (tekshiruv o'tdi)
+    # qaytarardi — DEBUG=False (production) bo'lsa ham! Bu Telegram'ning
+    # aynan shu holatdagi xatti-harakatiga (fail-CLOSED, pastdagi
+    # verify_telegram_webhook'ga qarang) mutlaqo zid edi. Amalda: agar
+    # operator production'da META_APP_SECRET'ni sozlashni unutib qo'ysa,
+    # /webhook/instagram/ endpointi HAR QANDAY soxta so'rovni haqiqiy deb
+    # qabul qila boshlardi — bu orqali soxta "mijoz xabarlari" yuborib,
+    # haqiqiy Gemini chaqiruvlarini va hatto soxta buyurtmalarni
+    # keltirib chiqarish mumkin edi. Endi Telegram bilan bir xil qoida:
+    # faqat DEBUG=True bo'lsa dev qulayligi uchun o'tkazib yuboriladi,
+    # aks holda (production) sozlama yo'qligi RAD ETISH sababi bo'ladi.
+    if getattr(settings, "DEBUG", False):
+        return True
+
     try:
         app_secret = settings.META_APP_SECRET
         if not app_secret:
-            logger.warning("META_APP_SECRET sozlanmagan! Dev rejimi.")
-            return True
+            logger.error(
+                "META_APP_SECRET sozlanmagan! "
+                "Production muhitda Instagram webhook tekshiruvi o'tkazilmaydi."
+            )
+            return False
 
         signature_header = request.headers.get("X-Hub-Signature-256", "")
         if not signature_header.startswith("sha256="):

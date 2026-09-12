@@ -6,11 +6,31 @@ bu modul uni tekshirib, Order modeliga saqlaydi
 va egasiga xabar yuboradi.
 """
 import logging
+import re
 from typing import Optional
 
 from django.utils import timezone
 
 logger = logging.getLogger("apps.chat")
+
+
+def _clean_and_check_phone(raw_phone: str) -> tuple[str, bool]:
+    """
+    Telefon raqamini tozalaydi va shubhali (harf aralashgan, juda qisqa/
+    uzun) qiymatlarni aniqlaydi. AI ba'zan raqamga harf qo'shib qo'yishi
+    yoki noto'g'ri formatda yozishi mumkin — bunday holatlarni jimgina
+    o'tkazib yubormasdan, keyinroq do'kon egasi tekshirishi uchun
+    belgilaymiz.
+
+    Returns:
+        (tozalangan_raqam, shubhalimi)
+    """
+    has_letters = bool(re.search(r"[a-zA-Zа-яА-ЯЎўҚқҒғҲҳ]", raw_phone))
+    plus_prefix = "+" if raw_phone.strip().startswith("+") else ""
+    digits_only = re.sub(r"\D", "", raw_phone)
+    cleaned = f"{plus_prefix}{digits_only}" if digits_only else raw_phone.strip()
+    is_suspicious = has_letters or len(digits_only) < 9 or len(digits_only) > 15
+    return cleaned, is_suspicious
 
 
 def create_order_from_ai_data(
@@ -57,6 +77,14 @@ def create_order_from_ai_data(
             logger.warning("Buyurtma yaratish: phone bo'sh!")
             return None
 
+        # ⚠️ BUG FIX: telefon raqami avval hech qanday tekshiruvsiz,
+        # AI qanday yozgan bo'lsa xuddi shundayligicha saqlanardi — agar
+        # AI raqamga tasodifan harf qo'shib qo'ysa yoki formatni buzsa,
+        # do'kon egasi mijozga qo'ng'iroq qila olmay qolishi mumkin edi,
+        # va bu hech qayerda ko'rinmasdi. Endi bunday holat aniqlanadi va
+        # buyurtma izohida ochiq belgilanadi.
+        phone, phone_suspicious = _clean_and_check_phone(phone)
+
         # items list bo'lishi kerak
         if not isinstance(items, list):
             items = []
@@ -76,6 +104,8 @@ def create_order_from_ai_data(
         booking_time = str(order_data.get("booking_time", "")).strip()
 
         extra_notes = []
+        if phone_suspicious:
+            extra_notes.append(f"⚠️ Telefon raqami shubhali ko'rinadi, tekshiring: {phone}")
         if course_name:
             if not items:
                 # Narx pastdagi katalog-tekshiruv bosqichida haqiqiy
@@ -151,7 +181,19 @@ def create_order_from_ai_data(
                 )
                 verified_price = 0
 
-            verified_items.append({"name": item_name, "qty": qty, "price": verified_price})
+            # ⚠️ BUG FIX: avval bu yerda mahsulotning ID'si items ichida
+            # SAQLANMAGAN edi — faqat nomi, soni va narxi. Order modelidagi
+            # `_restock_items()` (buyurtma bekor qilinganda stokni omborga
+            # qaytaruvchi funksiya) esa aynan `item.get("product_id")`ni
+            # qidiradi — bu maydon hech qachon bo'lmagani uchun u har doim
+            # hech narsa topolmay, jimgina hech narsa qilmasdi. Endi
+            # product_id ham saqlanadi.
+            verified_items.append({
+                "name": item_name,
+                "qty": qty,
+                "price": verified_price,
+                "product_id": str(catalog_product.id) if catalog_product else None,
+            })
 
         items = verified_items
         total_amount = sum(item["price"] * item["qty"] for item in items)
@@ -170,6 +212,18 @@ def create_order_from_ai_data(
             status=Order.Status.NEW,
             source_message=source_message,
         )
+
+        # ⚠️ BUG FIX: Buyurtma yaratilganda ombordagi mahsulot soni
+        # (Product.stock) HECH QACHON kamaytirilmasdi — do'kon egasi
+        # "Mahsulotlar" bo'limida hamon eski (kamaymagan) sonni ko'rardi,
+        # xatto ko'plab buyurtma tushgan bo'lsa ham. Bundan tashqari,
+        # `Order.update_status()` buyurtma BEKOR QILINGANDA stokni
+        # omborga QAYTARARDI (_restock_items) — ammo hech qachon avval
+        # kamaytirilmagani uchun bu bekor qilishda stokni SUN'IY RAVISHDA
+        # OSHIRIB YUBORARDI. Endi buyurtma yaratilgan zahoti mos
+        # mahsulotlarning stoki kamaytiriladi — shunda "yaratishda kamayish,
+        # bekor qilishda qaytarish" balansi to'g'ri ishlaydi.
+        order._deduct_stock_items()
 
         # ── Mijoz ma'lumotlarini yangilash ─────────────────────────
         # Agar birinchi marta ism/raqam olingan bo'lsa — Customer'ga ham yozamiz

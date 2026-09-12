@@ -15,7 +15,6 @@ Edge-case qoidalari:
 """
 import json
 import logging
-import re
 import time
 from typing import Optional
 from dataclasses import dataclass
@@ -225,8 +224,28 @@ Siz bilan muloqot qilayotgan inson ushbu do'konning HAKIQIY EGASI (Biznes Rahbar
 
     store_custom_prompt = store.ai_system_prompt or "Siz yordamchi botisiz."
 
+    # ⚠️ BUG FIX: avval bu yerda AI'ga HOZIRGI SANA umuman berilmagan edi —
+    # shuning uchun mijoz "17-avgust" kabi ALLAQACHON O'TIB KETGAN sanani
+    # aytsa ham, AI buni haqiqatan ham o'tganini bila olmasdi (Gemini'ning
+    # o'z ichida haqiqiy vaqt bo'yicha ma'lumoti yo'q) va shunchaki qabul
+    # qilib, buyurtma/lid sifatida saqlab yuborardi (jonli testda
+    # kuzatildi). Endi bugungi sana aniq ko'rsatiladi va o'tib ketgan
+    # sanani rad etish qoidasi qo'shildi.
+    from django.utils import timezone as _tz
+    _uz_days = ["Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma", "Shanba", "Yakshanba"]
+    _uz_months = ["", "Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun", "Iyul", "Avgust", "Sentabr", "Oktabr", "Noyabr", "Dekabr"]
+    _now = _tz.now()
+    today_str = f"{_uz_days[_now.weekday()]}, {_now.day}-{_uz_months[_now.month]} {_now.year}-yil, soat {_now.strftime('%H:%M')}"
+
     return f"""
 {base_instructions}
+
+---
+## Hozirgi Sana va Vaqt:
+Bugun: {today_str}
+Mijoz sanani (masalan sinov darsi, band qilish, yetkazib berish uchun) aytganda yoki tanlaganda, YUQORIDAGI HAQIQIY SANAGA nisbatan tekshiring:
+- Agar mijoz ALLAQACHON O'TIB KETGAN sanani aytsa (masalan bugundan oldingi kun/oy), buni AYTIB QOLDIRMANG — muloyimlik bilan ogohlantiring: "Kechirasiz, siz aytgan sana allaqachon o'tib ketgan (bugun {today_str.split(',')[0]}, {_now.day}-{_uz_months[_now.month]}). Boshqa, kelajakdagi sana/kun tanlab bera olasizmi?" va TO'G'RI (kelajakdagi) sana kelmaguncha buyurtma/lid JSON'ini HECH QACHON yubormang.
+- Faqat kelajakdagi (yoki bugungi) sanalarni tasdiqlang.
 
 ---
 ## Salomlashish va Sotuvga Yo'naltirish Qoidasi (Sales-Driven Greeting):
@@ -351,6 +370,18 @@ def _load_conversation_history(store, customer) -> list[dict]:
 MAX_DAILY_AI_MESSAGES_PER_CUSTOMER = 20
 MAX_SPAM_MESSAGES_PER_MINUTE = 5
 
+# ⚠️ XAVFSIZLIK: yuqoridagi ikkala limit ham `customer.id` bo'yicha, ya'ni
+# DO'KON DARAJASIDA hisoblanadi. Lekin bitta haqiqiy odam (bitta Telegram
+# platform_user_id) turli do'konlarning har biriga alohida "Customer"
+# sifatida ro'yxatga olinadi (ko'p-tenantli dizayn), demak har bir do'kon
+# UCHUN alohida hisoblagichga ega bo'ladi. Ya'ni bitta odam N ta turli
+# do'konning botiga navbat bilan yozib, N barobar ko'p Gemini so'rovini
+# (BARCHA do'konlar UMUMIY bitta GEMINI_API_KEY dan foydalanadi!) chaqira
+# oladi — do'kon darajasidagi limit buni cheklamaydi. Shu sabab qo'shimcha,
+# PLATFORM_USER_ID bo'yicha (do'kondan mustaqil) GLOBAL limit qo'yiladi.
+GLOBAL_MAX_AI_MESSAGES_PER_MINUTE = 15
+GLOBAL_MAX_AI_MESSAGES_PER_DAY = 60
+
 
 def _incr_with_ttl(key: str, timeout: int) -> int:
     """
@@ -394,6 +425,18 @@ def check_rate_limit(store, customer) -> tuple[bool, str]:
         customer.ai_active = False
         customer.save(update_fields=["ai_active", "updated_at"])
         return True, "Muloqot uchun rahmat! Savollaringiz bo'yicha tez orada operatorimiz siz bilan shaxsan bog'lanadi va yordam beradi. 😊"
+
+    # Global (do'kondan mustaqil, platform_user_id bo'yicha) limit — bitta
+    # odam ko'plab do'konlarga yozib, umumiy Gemini byudjetini "bo'lib
+    # ketishning" oldini oladi.
+    global_key_prefix = f"ratelimit:global:{customer.platform}:{customer.platform_user_id}"
+    global_min_count = _incr_with_ttl(f"{global_key_prefix}:1min", timeout=60)
+    if global_min_count >= GLOBAL_MAX_AI_MESSAGES_PER_MINUTE:
+        return True, "Siz juda tez-tez xabar yubormoqdasiz. Iltimos, 1 daqiqa kuting. 😊"
+
+    global_daily_count = _incr_with_ttl(f"{global_key_prefix}:daily", timeout=60 * 60 * 24)
+    if global_daily_count >= GLOBAL_MAX_AI_MESSAGES_PER_DAY:
+        return True, "Bugungi xabar limitingizga yetdingiz. Iltimos, ertaga qayta urinib ko'ring yoki operator bilan bog'laning. 😊"
 
     return False, ""
 
@@ -550,6 +593,39 @@ def _call_gemini(store, customer, user_message: str, model_name: str = "gemini-3
 # BUYURTMA ANIQLASH (ORDER EXTRACTION)
 # ─────────────────────────────────────────────────────────────
 
+def _find_balanced_json_end(text: str, start_idx: int) -> Optional[int]:
+    """
+    `text[start_idx]` "{" bo'lishi kerak. Shu joydan boshlab qavslar
+    balansini (string ichidagi qavslarni hisobga olmasdan) hisoblab,
+    mos keluvchi yopuvchi "}" dan KEYINGI indeksni qaytaradi.
+    """
+    if start_idx >= len(text) or text[start_idx] != "{":
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start_idx, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+        else:
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+    return None
+
+
 def _extract_order_data(response_text: str) -> Optional[dict]:
     """
     AI javobidan buyurtma JSON'ini ajratib oladi.
@@ -575,41 +651,35 @@ def _extract_order_data(response_text: str) -> Optional[dict]:
     if not has_trigger:
         return None
 
-    # ⚠️ BUG FIX: avval BARCHA patternlar BITTA try/except ichida ketma-ket
-    # sinalardi. Birinchi (eng umumiy) pattern — r"```json\s*\n?(.*?)\n?```" —
-    # har doim eng birinchi mos kelardi, lekin u fence ICHIDAGI HAMMA narsani
-    # ("lid_malumotlari:\n{...}" — JSON bo'lmagan prefiks bilan birga) qamrab
-    # olardi. `json.loads` bunga albatta xato berardi ("Expecting value"),
-    # va bu xato DARHOL butun funksiyani to'xtatib qo'yardi — pastdagi
-    # to'g'ri, faqat "{...}" ob'ektining o'zini ushlaydigan patternlar
-    # HECH QACHON sinab ko'rilmasdi. Natijada bu funksiya deyarli hech
-    # qachon muvaffaqiyatli JSON qaytarmagan — ya'ni mijozning ismi/
-    # telefoni/kursi kabi lid ma'lumotlari backend'da UMUMAN saqlanmagan
-    # (jonli testda tasdiqlandi). Endi har bir pattern O'Z ALOHIDA
-    # try/except'ida sinaladi va eng aniq (keyword-prefiksli) patternlar
-    # birinchi navbatda tekshiriladi.
-    patterns = [
-        r"buyurtma_malumotlari:\s*(\{.*?\})\s*\n?```",
-        r"lid_malumotlari:\s*(\{.*?\})\s*\n?```",
-        r"band_qilish_malumotlari:\s*(\{.*?\})\s*\n?```",
-        r"buyurtma_malumotlari:\s*(\{.*?\})",
-        r"lid_malumotlari:\s*(\{.*?\})",
-        r"band_qilish_malumotlari:\s*(\{.*?\})",
-        r"ORDER_DATA:\s*(\{.*?\})",
-        r"```json\s*\n?(\{.*?\})\s*\n?```",
-        r"```\s*\n?(\{.*?\})\s*\n?```",
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, response_text, re.DOTALL | re.IGNORECASE)
-        if not match:
+    # ⚠️ BUG FIX: avval "\{.*?\}" (non-greedy regex) ishlatilardi — bu
+    # FAQAT tekis (flat) JSON uchun ishlaydi. E-commerce formatida esa
+    # "items" massivi ICHIDA yana obyektlar bor
+    # (masalan {"items": [{"name": "...", "price": 1200000}], "notes": "..."})
+    # — non-greedy regex birinchi ICHKI yopuvchi qavsda to'xtab, JSON'ni
+    # yarim-yorti qaytarardi, `json.loads` esa buni har doim rad etardi.
+    # Natijada E-COMMERCE toifasidagi HECH BIR buyurtma saqlanmasdi (jonli
+    # testda tasdiqlandi: has_order har doim False chiqardi). Endi har bir
+    # tetik so'zdan keyingi "{" dan boshlab, qavslar balansi to'g'ri
+    # hisoblanib, JSON qanchalik chuqur ichma-ich bo'lishidan qat'i nazar
+    # to'liq va to'g'ri ajratib olinadi.
+    for keyword in ORDER_TRIGGER_KEYWORDS:
+        idx = response_text.find(keyword)
+        if idx == -1:
             continue
 
-        json_str = match.group(1).strip()
+        brace_start = response_text.find("{", idx)
+        if brace_start == -1:
+            continue
+
+        brace_end = _find_balanced_json_end(response_text, brace_start)
+        if brace_end is None:
+            continue
+
+        json_str = response_text[brace_start:brace_end]
         try:
             data = json.loads(json_str)
         except (json.JSONDecodeError, ValueError) as e:
-            logger.debug(f"Pattern mos keldi lekin JSON parse xatosi (keyingisi sinaladi): {e}")
+            logger.debug(f"Balanslangan JSON topildi lekin parse xatosi: {e}")
             continue
 
         # Minimal validatsiya
@@ -626,22 +696,26 @@ def _extract_order_data(response_text: str) -> Optional[dict]:
 def _clean_response_text(text: str) -> str:
     """
     AI javobidan JSON blokini o'chiradi. Mijoz faqat xushmuomala matnni ko'radi.
+
+    ⚠️ BUG FIX: avval bu yerda regex orqali ("\\{.*?\\}") JSON qismini
+    "kesib olib tashlash" (re.sub) usuli ishlatilgan edi. Bu non-greedy
+    naqsh E-commerce formatidagi ICHKI qavslarga (masalan "items":
+    [{...}] massivi) yetganda BIRINCHI ichki yopuvchi qavsda to'xtab
+    qolib, JSON'ning FAQAT boshini olib tashlar, qolgan qismini
+    ("], \"notes\": ... }" kabi) esa xom holicha mijozga qoldirib
+    yuborardi (jonli testda kuzatildi: E-commerce buyurtmasida bunday
+    "qoldiq" ko'rinib qoldi). Tizim ko'rsatmasi AI'ga JSON blokini har
+    doim JAVOBNING ENG OXIRIDA qaytarishni buyuradi — demak undan keyin
+    mijozga ko'rsatiladigan mazmunli matn umuman bo'lishi kerak emas.
+    Shu sabab endi murakkab qavs-tahlili o'rniga eng sodda va shu bilan
+    birga eng ISHONCHLI strategiya qo'llaniladi: JSON boshlanishi
+    belgisi (```json yoki tetik so'z) qayerda birinchi uchrasa, o'sha
+    nuqtadan boshlab QOLGAN BUTUN matn kesib tashlanadi — qavslar
+    qanchalik chuqur ichma-ich bo'lishidan qat'i nazar ishlaydi.
     """
     if not text:
         return ""
 
-    text = re.sub(r"```(?:json)?\s*(?:buyurtma_malumotlari:|lid_malumotlari:|band_qilish_malumotlari:?)?.*?```", "", text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"(?:buyurtma_malumotlari|lid_malumotlari|band_qilish_malumotlari):\s*\{.*?\}", "", text, flags=re.DOTALL | re.IGNORECASE)
-
-    # ⚠️ BUG FIX: yuqoridagi ikkala regex ham JSON blokining YOPILGAN
-    # bo'lishini (``` yoki `}` bilan tugashini) talab qiladi. Agar Gemini
-    # javobi `max_output_tokens` chegarasiga yetib, JSON o'rtasida kesilib
-    # qolsa (yopuvchi ``` yoki `}` hech qachon kelmaydi), ikkala regex ham
-    # hech narsaga mos kelmay, chala JSON matni O'ZGARISHSIZ mijozga
-    # ko'rinardi (jonli testda aynan shu holat kuzatildi). Endi: agar
-    # matnda hali ham JSON boshlanishi belgisi (```json yoki tetik so'z)
-    # qolgan bo'lsa — bu doim texnik ma'lumot, hech qachon mijozga ko'rinishi
-    # kerak emas — shu nuqtadan boshlab qolgan matn butunlay kesib tashlanadi.
     cut_markers = ["```json", "```"] + ORDER_TRIGGER_KEYWORDS
     earliest_cut = len(text)
     lowered = text.lower()
