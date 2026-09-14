@@ -306,6 +306,7 @@ def process_incoming_message(
         # ── 4.5. Media Persistence (Rasm/Audio Saqlash Pipeline) ────────
         # Webhook payload'da media url yoki Telegram voice bo'lsa fonda
         # saqlash taskini chaqiramiz
+        has_voice = False
         if raw_payload and isinstance(raw_payload, dict):
             inner_message = raw_payload.get("message", {})
             has_attachments = bool(inner_message.get("attachments"))
@@ -315,6 +316,29 @@ def process_incoming_message(
                     download_and_store_chat_media.delay(str(chat_message.id))
                 except Exception as e:
                     logger.warning(f"Media download task chaqirishda xato: {e}")
+
+        # ── 4.55. Ovozli xabar — AI'ga yubormasdan, aniq javob beramiz ──
+        # ⚠️ AI hozircha ovozni tushunmaydi — bu bosqichgacha `text` faqat
+        # "🎙️ Ovozli xabar (Ns)" degan belgi matni (parsers.py'da
+        # yaratiladi), haqiqiy gap emas. Buni Gemini'ga yuborish AI'ni
+        # eshitmagan narsasiga ishonch bilan javob berishga (hallucination)
+        # majbur qilardi — bu esa loyihaning "AI hech qachon o'ylab
+        # topmaydi" qoidasiga zid. Fayl baribir yuqorida saqlanadi,
+        # operator dashboard'da eshitib qo'lda javob bera oladi.
+        if has_voice:
+            logger.info(f"[Task] Ovozli xabar keldi -> AI'ga yuborilmadi, matn bilan yozishni so'radik | store={store.name}")
+            voice_reply_text = (
+                "Kechirasiz, hozircha ovozli xabarlarni tushunmayman 🙏\n"
+                "Iltimos, savolingizni matn bilan yozib yuboring."
+            )
+            _send_command_reply(
+                store, customer, platform, chat_id,
+                text=voice_reply_text,
+            )
+            ChatMessage.objects.filter(id=chat_message.id).update(
+                processing_status=ChatMessage.ProcessingStatus.COMPLETED
+            )
+            return
 
         # ── 4.6. Operator Handoff Trigger (Mijoz Insoniy Operator So'raganda) ─
         HANDOFF_KEYWORDS = ["operator", "odam bilan", "insonga", "call center", "menejer", "human"]
