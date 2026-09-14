@@ -306,5 +306,3 @@ TWA (Frontend va Dashboard API) integratsiyasini tekshirasiz va kamchiliklarni t
 
 
 
------how to create a server in my own environment----
-ngrok http 8000
