@@ -14,6 +14,42 @@ from django.utils import timezone
 logger = logging.getLogger("apps.chat")
 
 
+def _find_catalog_product(store, item_name: str):
+    """
+    Mahsulot/kurs/xizmatni nomi bo'yicha katalogdan topadi.
+
+    ⚠️ BUG FIX: avval oddiy `.filter(name__icontains=item_name).first()`
+    ishlatilardi — bu hech qanday tartib (`order_by`) bermaganligi sabab,
+    agar katalogda bir nomi ikkinchisining ICHIDA bo'lgan 2 ta mahsulot
+    bo'lsa (masalan "Kurtka qora" va "Kurtka qora XL o'lcham"), qaysi
+    biri qaytishi Postgres uchun ANIQLANMAGAN (tasodifiy) edi — jonli
+    stress-testda buni aynan shu holatda **noto'g'ri, qimmatroq mahsulot
+    tanlanib, narx buzilib ketishi** orqali tasdiqladik. Endi avval ANIQ
+    (katta-kichik harfga sezgir bo'lmagan) mos kelishni qidiramiz — bu
+    eng ishonchli. Aniq mos kelmasa, qisman mos keluvchilar orasidan ENG
+    QISQA nomlisi tanlanadi (chunki so'ralgan nomga eng yaqin, kamroq
+    qo'shimcha so'z qo'shilgan variant shu bo'ladi).
+    """
+    if not item_name:
+        return None
+
+    from apps.products.models import Product
+
+    exact = Product.objects.filter(
+        store=store, is_deleted=False, is_active=True, name__iexact=item_name
+    ).first()
+    if exact:
+        return exact
+
+    candidates = list(Product.objects.filter(
+        store=store, is_deleted=False, is_active=True, name__icontains=item_name
+    ))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda p: len(p.name))
+    return candidates[0]
+
+
 def _clean_and_check_phone(raw_phone: str) -> tuple[str, bool]:
     """
     Telefon raqamini tozalaydi va shubhali (harf aralashgan, juda qisqa/
@@ -150,8 +186,6 @@ def create_order_from_ai_data(
             except (ValueError, TypeError):
                 return default
 
-        from apps.products.models import Product
-
         verified_items = []
         for item in items:
             if not isinstance(item, dict):
@@ -160,10 +194,7 @@ def create_order_from_ai_data(
             ai_stated_price = _safe_number(item.get("price", 0))
             qty = int(_safe_number(item.get("qty", 1)) or 1)
 
-            catalog_product = (
-                Product.objects.filter(store=store, is_deleted=False, is_active=True, name__icontains=item_name).first()
-                if item_name else None
-            )
+            catalog_product = _find_catalog_product(store, item_name)
 
             if catalog_product:
                 real_price = float(catalog_product.price)

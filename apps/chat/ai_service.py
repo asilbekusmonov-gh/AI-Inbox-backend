@@ -156,10 +156,41 @@ def build_system_prompt(store, customer=None, user_message: str = "") -> str:
 
     # Agarda do'kon egasi yozayotgan bo'lsa -> AI Biznes Asistent Rejimi
     if is_owner:
+        from django.db.models import Sum, Count
+
+        # ⚠️ BUG FIX (2 ta xato birga): avval bu yerda FAQAT "bugungi"
+        # ko'rsatkich bor edi, va u HAR QANDAY holatdagi (yangi, tasdiq-
+        # langan, bekor qilingan — hammasi birga) buyurtmalarni "sotuv"
+        # deb hisoblab, yig'indisini "Bugungi sotuvlar summasi" deb
+        # nomlardi. Jonli testda aniqlandi: bugun bor-yo'g'i 1 ta
+        # "confirmed" (hali yakunlanmagan!) buyurtma bo'lsa ham, AI buni
+        # egasiga "1 ta yakunlangan sotuv" deb aytib qo'ydi — holbuki
+        # do'konda JAMI 50 ta haqiqiy yakunlangan buyurtma bor edi, lekin
+        # AI bu haqda BUTUNLAY BEXABAR edi (faqat "bugungi" oynasi
+        # berilgan, "jami" statistika umuman yo'q edi). Natijada egasi
+        # "nechta buyurtma yakunlandi?" deb so'raganda, AI bilmagan holda
+        # juda kichik va noto'g'ri raqam bilan javob berardi. Endi:
+        # (a) faqat status=COMPLETED bo'lganlar "sotuv" deb hisoblanadi,
+        # (b) ham bugungi, ham JAMI (butun davr) ko'rsatkichlar beriladi.
         today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        today_orders = Order.objects.filter(store=store, created_at__gte=today_start, is_deleted=False)
-        today_total = sum(o.total_amount for o in today_orders)
-        new_orders_count = Order.objects.filter(store=store, status="new", is_deleted=False).count()
+
+        today_completed = Order.objects.filter(
+            store=store, status=Order.Status.COMPLETED, status_changed_at__gte=today_start, is_deleted=False,
+        ).aggregate(count=Count("id"), total=Sum("total_amount"))
+        today_new_orders_count = Order.objects.filter(
+            store=store, created_at__gte=today_start, is_deleted=False,
+        ).count()
+
+        all_time = Order.objects.filter(store=store, is_deleted=False).aggregate(
+            total_orders=Count("id"),
+        )
+        all_time_completed = Order.objects.filter(
+            store=store, status=Order.Status.COMPLETED, is_deleted=False,
+        ).aggregate(count=Count("id"), total=Sum("total_amount"))
+
+        pending_orders_count = Order.objects.filter(
+            store=store, status__in=[Order.Status.NEW, Order.Status.CONFIRMED], is_deleted=False,
+        ).count()
         low_stock_count = Product.objects.filter(store=store, stock__lte=3, is_active=True, is_deleted=False).count()
 
         return f"""
@@ -168,8 +199,11 @@ Siz bilan muloqot qilayotgan inson ushbu do'konning HAKIQIY EGASI (Biznes Rahbar
 
 ---
 ## Hozirgi Tizim Ko'rsatkichlari (Real vaqt ma'lumotlari):
-• Bugungi sotuvlar summasi: {today_total:,.0f} so'm ({today_orders.count()} ta buyurtma)
-• Tasdiqlash kutayotgan yangi buyurtmalar: {new_orders_count} ta
+• Bugun yakunlangan (status=Yakunlangan) sotuvlar: {today_completed['count'] or 0} ta, summasi {today_completed['total'] or 0:,.0f} so'm
+• Bugun kelib tushgan buyurtmalar (barcha holatda, hali yakunlanmagan bo'lishi ham mumkin): {today_new_orders_count} ta
+• JAMI (butun davr) yakunlangan sotuvlar: {all_time_completed['count'] or 0} ta, summasi {all_time_completed['total'] or 0:,.0f} so'm
+• JAMI (butun davr) barcha buyurtmalar soni: {all_time['total_orders'] or 0} ta
+• Hozir kutilayotgan (yangi + tasdiqlangan, hali yakunlanmagan) buyurtmalar: {pending_orders_count} ta
 • Omborda kam qolgan (<=3) mahsulotlar: {low_stock_count} ta
 • Aktiv AI Soha Rejimi: {getattr(store, 'category_type', 'e_commerce')}
 • AI Bot Holati: {'Faol' if store.ai_active else 'Pauzada'}
@@ -178,7 +212,9 @@ Siz bilan muloqot qilayotgan inson ushbu do'konning HAKIQIY EGASI (Biznes Rahbar
 ## Egasiga Javob Berish Qoidalari:
 1. Do'kon egasiga samimiy va hurmat bilan: "Assalomu alaykum, Xo'jayin! {store.name} bo'yicha qanday hisobot yoki ma'lumot kerak?" deb murojaat qiling.
 2. Egasi sotuvlar, stoklar yoki yangi buyurtmalar haqida so'rasa, yuqoridagi real ko'rsatkichlardan foydalanib aniq javob bering.
-3. Egasiga mijozlarga sotish uchun mo'ljallangan matnlarni (narx so'rash, manzil so'rash) ISHLATMANG. Faqat analitika, boshqaruv va biznes maslahatlar bering.
+3. MUHIM: agar egasi "nechta" yoki "qancha" deb, VAQT OMILINI ANIQ AYTMASDAN so'rasa (masalan "nechta buyurtma yakunlandi?"), FAQAT "bugungi" raqamni bermang — buni "JAMI (butun davr)" ko'rsatkichi bilan ham to'ldirib, ikkalasini ham ayting (masalan: "Bugun 1 ta, jami esa 50 ta buyurtma yakunlangan"). Faqat egasi aniq "bugun" yoki "shu kun" desa, faqat bugungi raqamni bering.
+4. "Yakunlangan" va "kutilayotgan/tasdiqlangan" buyurtmalarni HECH QACHON aralashtirmang — faqat status=Yakunlangan bo'lganlarni "sotuv" deb ayting, tasdiqlangan yoki yangi buyurtmalarni "sotuv" deb atamang.
+5. Egasiga mijozlarga sotish uchun mo'ljallangan matnlarni (narx so'rash, manzil so'rash) ISHLATMANG. Faqat analitika, boshqaruv va biznes maslahatlar bering.
 """.strip()
 
     # Oddiy Mijozlar uchun -> AI Sotuvchi Rejimi
