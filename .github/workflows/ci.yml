@@ -79,6 +79,9 @@ jobs:
       - name: Apply migrations (verifies they run cleanly end-to-end)
         run: uv run python manage.py migrate --noinput
 
+      - name: Run test suite
+        run: uv run python manage.py test
+
       - name: Compile-check all Python source files
         run: uv run python -m compileall apps ai_inbox_backend -q
 
