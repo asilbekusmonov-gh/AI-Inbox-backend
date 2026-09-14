@@ -18,6 +18,7 @@ AI-Inbox connects a business's Telegram (and soon Instagram) presence to a Gemin
 - [Onboarding a store](#onboarding-a-store)
 - [Management commands](#management-commands)
 - [API](#api)
+- [CI/CD](#cicd)
 - [Security model](#security-model)
 - [Frontend](#frontend)
 - [Roadmap](#roadmap)
@@ -169,6 +170,19 @@ Interactive docs (Swagger + Redoc) are generated automatically from the codebase
 - `GET /api/v1/schema/` — raw OpenAPI 3 schema
 
 Every business-data endpoint (`/orders/`, `/products/`, `/customers/`, `/chat/`, `/store/`) is tenant-scoped: a request is resolved to exactly one Store via either a verified Telegram `initData` header or a JWT-authenticated user's own store — there is no way to read or write another tenant's data by passing an ID.
+
+## CI/CD
+
+**CI (`.github/workflows/ci.yml`)** runs on every push/PR to `main` and is active by default — no setup needed:
+- Django system check + `makemigrations --check` (catches a model change that's missing its migration before it reaches `main`)
+- Migrations applied end-to-end against a throwaway Postgres to confirm they run cleanly
+- Docker image build, to catch a broken `Dockerfile`/dependency before it's needed on a real server
+
+**CD (`.github/workflows/deploy.yml`)** is a ready-to-use template, currently `workflow_dispatch`-only (manual trigger) since there's no production server yet. To activate once you have one:
+1. Add repo secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_PATH` (the project's absolute path on the server).
+2. Uncomment the `push: branches: [main]` trigger in the workflow file.
+
+It then SSHes in, pulls, rebuilds `web`/`celery_worker`/`celery_beat`, restarts the proxy layer (`nginx` — required after any `web` rebuild, since it caches the old container IP), and runs migrations. The [frontend repo](#frontend) has a matching `deploy.yml` that builds the TWA and rsyncs it into this repo's `static/twa/` on the same server — it expects the *same* `DEPLOY_PATH` value.
 
 ## Security model
 

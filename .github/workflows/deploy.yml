@@ -1,0 +1,53 @@
+# ════════════════════════════════════════════════════════════════
+# DEPLOY (CD) — HOZIRCHA FAOL EMAS
+#
+# Bu workflow shablon sifatida tayyorlab qo'yilgan — haqiqiy serveringiz
+# bo'lgach, quyidagi 2 qadamni bajarib faollashtirasiz:
+#
+# 1. GitHub'da: Settings → Secrets and variables → Actions → "New
+#    repository secret" orqali quyidagi 4 tasini qo'shing:
+#      - DEPLOY_HOST     — server IP yoki domeni (masalan 178.62.1.1)
+#      - DEPLOY_USER     — SSH orqali kiradigan foydalanuvchi nomi
+#      - DEPLOY_SSH_KEY  — shu foydalanuvchining XUSUSIY SSH kaliti
+#                           (butun matni, "-----BEGIN..." bilan birga)
+#      - DEPLOY_PATH     — serverdagi loyiha papkasi yo'li
+#                           (masalan /home/deploy/AI-Inbox-backend)
+#
+# 2. Pastdagi "on:" qismida "push:" bloki oldidagi "#" belgilarini olib
+#    tashlang — shunda "main" branch'ga har push qilinganda avtomatik
+#    joylashtiriladi. Https, u qadar hozircha shart emas — "Run
+#    workflow" tugmasi orqali istalgan vaqt qo'lda ham ishga tushirish
+#    mumkin (hozir ham, sozlamasdan turib emas, sirlar to'ldirilgach).
+#
+# ⚠️ Eslatma (bu loyihaning o'ziga xos holati): `web` konteynerini
+# qayta yaratgandan keyin backend'ning proksi qatlami (nginx) eski IP
+# manzilni keshlab qolib, 502 xato berishi mumkin — shu sabab pastda
+# "web"dan keyin proksi ham albatta qayta ishga tushiriladi.
+# ════════════════════════════════════════════════════════════════
+
+name: Deploy (Production)
+
+on:
+  workflow_dispatch: {}
+  # push:
+  #   branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd "${{ secrets.DEPLOY_PATH }}"
+            git pull origin main
+            docker compose up -d --build web celery_worker celery_beat
+            sleep 5
+            docker compose restart nginx
+            docker compose exec -T web python manage.py migrate --noinput
+            docker compose exec -T web python manage.py collectstatic --noinput

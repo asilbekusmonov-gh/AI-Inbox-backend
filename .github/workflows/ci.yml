@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-check:
+    name: Django checks & migrations
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ai_inbox_ci
+          POSTGRES_USER: ai_inbox_ci
+          POSTGRES_PASSWORD: ci_password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # ⚠️ Bular FAQAT CI (sinov) muhiti uchun — hech qanday haqiqiy
+      # maxfiy ma'lumot emas. Haqiqiy .env fayl hech qachon Git'ga
+      # push qilinmaydi va bu yerga ham yozilmaydi.
+      SECRET_KEY: ci-only-not-a-real-secret
+      DEBUG: "True"
+      DB_NAME: ai_inbox_ci
+      DB_USER: ai_inbox_ci
+      DB_PASSWORD: ci_password
+      DB_HOST: localhost
+      DB_PORT: 5432
+      REDIS_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/0
+      CELERY_RESULT_BACKEND: redis://localhost:6379/1
+      GEMINI_API_KEY: ci-dummy-key
+      TELEGRAM_BOT_TOKEN: ci-dummy-token
+      TELEGRAM_WEBHOOK_SECRET: ci-dummy-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Django system check
+        run: uv run python manage.py check
+
+      # ⚠️ Bu qadam ayniqsa muhim: bu sessiyada bir necha marta model
+      # o'zgartirilib, migratsiya yaratishni unutish oson bo'lgan
+      # holatlar bo'ldi. Bu tekshiruv shunday holatni PR bosqichidayoq
+      # ushlab qoladi — production'ga "migratsiyasiz model o'zgarishi"
+      # hech qachon yetib bormaydi.
+      - name: Check for missing migrations
+        run: uv run python manage.py makemigrations --check --dry-run
+
+      - name: Apply migrations (verifies they run cleanly end-to-end)
+        run: uv run python manage.py migrate --noinput
+
+      - name: Compile-check all Python source files
+        run: uv run python -m compileall apps ai_inbox_backend -q
+
+  docker-build:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (no push — just verifies the Dockerfile works)
+        run: docker build -t ai-inbox-backend:ci .
