@@ -67,13 +67,20 @@ class Command(BaseCommand):
                 store.save()
                 self.stdout.write(self.style.SUCCESS(f"🏬 Do'kon biriktirildi: {store.name}"))
 
-                # 2. Bot Tavsifi (Dinamik Store Nomi bilan)
+                # 2. Bot Tavsifi
+                # ⚠️ Bu — bir nechta do'konga xizmat qiladigan BITTA umumiy
+                # bot (README'dagi "Single shared bot, many tenants"), shuning
+                # uchun tavsif hech qachon bitta do'kon nomiga bog'lanmasligi
+                # kerak — aks holda barcha boshqa do'konlarning mijozlari
+                # ham noto'g'ri (masalan "Pdp academy rasmiy...") matnni
+                # ko'radi. Avval shu xato bor edi, jonli tekshirishda
+                # aniqlandi va tuzatildi.
                 description = (
-                    f"🤖 {store.name} rasmiy AI sotuvchisi va yordamchisi.\n\n"
-                    f"✨ 24/7 savollaringizga javob beradi va buyurtmalaringizni tezkor qabul qiladi!\n\n"
-                    f"Boshlash uchun pastdagi 'START' tugmasini bosing 👇"
+                    "🤖 AI-Inbox — do'koningiz uchun sun'iy intellektli sotuvchi yordamchi.\n\n"
+                    "✨ 24/7 mijozlarga javob beradi va buyurtmalarni tezkor qabul qiladi!\n\n"
+                    "Boshlash uchun sizga yuborilgan shaxsiy havola orqali kiring 👇"
                 )
-                short_desc = f"{store.name} AI Yordamchisi"
+                short_desc = "24/7 ishlaydigon AI yordamchi"
 
                 client.post(
                     f"https://api.telegram.org/bot{bot_token}/setMyDescription",
@@ -83,7 +90,7 @@ class Command(BaseCommand):
                     f"https://api.telegram.org/bot{bot_token}/setMyShortDescription",
                     json={"short_description": short_desc}
                 )
-                self.stdout.write(self.style.SUCCESS(f"✅ Bot haqida dinamik tavsif o'rnatildi ({store.name})!"))
+                self.stdout.write(self.style.SUCCESS("✅ Bot haqida umumiy (barcha do'konlar uchun) tavsif o'rnatildi!"))
 
                 # 3. Buyruqlar menyusi (/ tugmasini bossa chiqadigan menyu)
                 commands = [
