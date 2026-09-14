@@ -4,8 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
     # --- Django Core ---
-    "django>=6.1",
+    "django>=5.1,<6.1",  # django-celery-beat hali Django 6.1'ni qo'llamaydi
     "djangorestframework>=3.16",
+    "drf-spectacular>=0.28",
     "djangorestframework-simplejwt>=5.4",
     "django-cors-headers>=4.7",
 
@@ -37,4 +38,5 @@ dependencies = [
     # --- Utilities ---
     "pillow>=11.1",                  # Rasm ishlash (IG media uchun)
     "python-dateutil>=2.9",
+    "gunicorn>=22.0",                 # Production WSGI server (Docker)
 ]
