@@ -20,6 +20,7 @@ from typing import Optional
 from dataclasses import dataclass
 
 import google.generativeai as genai
+import sentry_sdk
 from django.conf import settings
 
 logger = logging.getLogger("apps.chat")
@@ -555,7 +556,23 @@ def get_ai_response(store, customer, user_message: str) -> AIResponse:
             logger.warning(f"Gemini API xatosi ({model_name}): {e}")
             time.sleep(1)
 
-    logger.error(f"Gemini API barcha modellarda javob bermadi: {last_error}", exc_info=True)
+    # ⚠️ MONITORING: bu — "barcha fallback modellar ham ishlamadi" holati,
+    # ya'ni mijozga jonli AI javobi umuman berilmadi (FALLBACK_RESPONSE
+    # ko'rsatiladi). Bu aynan gemini-2.5/2.0-flash o'chib qolgan holatda
+    # sodir bo'lgan edi. `exc_info=True` + qo'shimcha kontekst Sentry'ga
+    # (agar SENTRY_DSN sozlangan bo'lsa) to'liq xato hisobotini yuboradi —
+    # SENTRY_DSN bo'sh bo'lsa, bu chaqiruvlar xavfsiz no-op bo'ladi.
+    logger.error(
+        f"Gemini API barcha modellarda javob bermadi: {last_error} | "
+        f"do'kon={store.name} (id={store.id}) | urinilgan modellar={fallback_models}",
+        exc_info=True,
+    )
+    sentry_sdk.set_context("ai_failure", {
+        "store_id": str(store.id),
+        "store_name": store.name,
+        "attempted_models": fallback_models,
+    })
+    sentry_sdk.capture_message("Gemini AI: barcha modellar muvaffaqiyatsiz tugadi", level="error")
     return AIResponse(
         text=FALLBACK_RESPONSE,
         tokens_used=0,
