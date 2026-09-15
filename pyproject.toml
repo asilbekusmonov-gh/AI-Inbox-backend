@@ -39,4 +39,5 @@ dependencies = [
     "pillow>=11.1",                  # Rasm ishlash (IG media uchun)
     "python-dateutil>=2.9",
     "gunicorn>=22.0",                 # Production WSGI server (Docker)
+    "openpyxl>=3.1",                 # Lidlarni Excel'ga eksport qilish
 ]

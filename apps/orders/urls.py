@@ -1,10 +1,10 @@
 """
-Order URLs
+Lead URLs
 """
 from rest_framework.routers import DefaultRouter
-from .views import OrderViewSet
+from .views import LeadViewSet
 
 router = DefaultRouter()
-router.register(r"", OrderViewSet, basename="order")
+router.register(r"", LeadViewSet, basename="lead")
 
 urlpatterns = router.urls

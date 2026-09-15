@@ -8,7 +8,7 @@ Ishlash oqimi:
 4. Gemini AI'ga jo'natish → javob olish
 5. AI javobini DB'ga saqlash
 6. Javobni platforma orqali yuborish
-7. Buyurtma aniqlangan bo'lsa → Order yaratish + egasiga xabarnoma
+7. Lid aniqlangan bo'lsa → Lead yaratish + egasiga xabarnoma
 
 SaaS qoidalari:
 - max_retries=3 + eksponensial backoff
@@ -19,11 +19,12 @@ import logging
 from celery import shared_task
 from celery.exceptions import MaxRetriesExceededError, SoftTimeLimitExceeded
 from django.conf import settings
+from django.db import IntegrityError
 
 logger = logging.getLogger("apps.webhooks")
 
 
-def _send_command_reply(store, customer, platform, chat_id, text, parse_mode="HTML", reply_markup=None):
+def _send_command_reply(store, customer, platform, chat_id, text, parse_mode="HTML", reply_markup=None, is_group_message=False):
     """
     Buyruq (/start, /dashboard, /help) javobini yuboradi VA uni
     ChatMessage sifatida (role=ASSISTANT) saqlaydi.
@@ -58,6 +59,7 @@ def _send_command_reply(store, customer, platform, chat_id, text, parse_mode="HT
             role=ChatMessage.Role.ASSISTANT,
             content=text,
             processing_status=ChatMessage.ProcessingStatus.COMPLETED,
+            is_group_message=is_group_message,
         )
     return sent
 
@@ -83,6 +85,7 @@ def process_incoming_message(
     chat_id: str,
     raw_payload: dict,
     sender_display_name: str = "",
+    chat_type: str = "private",
 ):
     """
     Webhook'dan qabul qilingan xabarni qayta ishlaydi.
@@ -90,20 +93,22 @@ def process_incoming_message(
     Bu task webhook view'dan chaqiriladi va:
     - AI dan javob oladi (Gemini)
     - Javobni platforma orqali yuboradi
-    - Buyurtma aniqlansa — Order yaratadi va egasiga xabar yuboradi
+    - Lid aniqlansa — Lead yaratadi va egasiga xabar yuboradi
     """
     from apps.stores.models import Store
     from apps.customers.models import Customer
     from apps.chat.models import ChatMessage
     from apps.chat.ai_service import get_ai_response
     from apps.chat.senders import send_reply
-    from apps.chat.order_service import create_order_from_ai_data, notify_store_owner
+    from apps.chat.lead_service import create_lead_from_ai_data, notify_store_owner, sync_lead_to_bitrix24
 
     logger.info(
         f"[Task] Boshlandi | store={store_id[:8]} | "
         f"platform={platform} | msg_id={message_id} | "
         f"task={self.request.id}"
     )
+
+    is_group = chat_type in ("group", "supergroup")
 
     try:
         # ── 1. Do'konni olish ────────────────────────────────────────
@@ -152,6 +157,7 @@ def process_incoming_message(
                 "raw_payload": raw_payload,
                 "processing_status": ChatMessage.ProcessingStatus.PROCESSING,
                 "celery_task_id": self.request.id,
+                "is_group_message": is_group,
             },
         )
 
@@ -166,12 +172,19 @@ def process_incoming_message(
         is_admin = False
         cmd_text = text.strip().lower()
 
+        # ⚠️ Do'kon egasi rejimi (Dashboard tugmasi, Biznes Analitika
+        # Assistenti) FAQAT shaxsiy chatda ishlaydi. Agar buni guruhda ham
+        # yoqib qo'ysak, ega o'zining bog'langan (ommaviy) guruhida oddiy
+        # xabar yozganida bot uni "xo'jayin" deb bilib, o'sha yerga ichki
+        # analitika/dashboard havolasini ochiq yuborib yuborishi mumkin edi.
         # Do'kon egasi ID allaqachon biriktirilgan va xuddi o'sha odam yozayapti → admin
-        if store.tg_owner_chat_id and str(store.tg_owner_chat_id) == str(sender_id):
+        if not is_group and store.tg_owner_chat_id and str(store.tg_owner_chat_id) == str(sender_id):
             is_admin = True
 
         # admin_ deep-link: /start admin_<store_uuid> — yangi egani biriktirish
-        elif cmd_text.startswith("/start"):
+        # (guruh xabarlari uchun bu allaqachon views.py'da ushlanadi, bu yerga
+        # yetib kelmasligi kerak — `not is_group` qo'shimcha himoya sifatida)
+        elif not is_group and cmd_text.startswith("/start"):
             parts = text.strip().split()
             if len(parts) > 1 and parts[1].startswith("admin_"):
                 if store.tg_owner_chat_id:
@@ -186,9 +199,59 @@ def process_incoming_message(
                     )
                     return
                 else:
-                    # Birinchi marta — egani biriktir
-                    store.tg_owner_chat_id = str(sender_id)
-                    store.save(update_fields=["tg_owner_chat_id"])
+                    # ⚠️ BUG FIX: avval bu yerda faqat "TARGET do'konning
+                    # egasi bormi" tekshirilardi — "bu foydalanuvchi
+                    # allaqachon BOSHQA bir do'konning egasimi" tekshirilmasdi.
+                    # `tg_owner_chat_id` maydonida unique cheklov borligi
+                    # uchun (bitta Telegram akkount faqat bitta do'konga ega
+                    # bo'lishi kerak), bunday holatda `.save()` IntegrityError
+                    # bilan qulab, task butunlay muvaffaqiyatsiz tugardi va
+                    # foydalanuvchi HECH QANDAY javob ololmasdi (jonli testda
+                    # aniqlandi). Endi oldindan tekshirilib, tushunarli xabar
+                    # bilan rad etiladi.
+                    from apps.stores.models import Store as _Store
+
+                    existing_owned_store = _Store.objects.filter(
+                        tg_owner_chat_id=str(sender_id)
+                    ).exclude(id=store.id).first()
+
+                    if existing_owned_store:
+                        logger.warning(
+                            f"[Task] Foydalanuvchi ({sender_id}) allaqachon "
+                            f"'{existing_owned_store.name}' do'konining egasi — "
+                            f"'{store.name}'ga biriktirib bo'lmadi"
+                        )
+                        _send_command_reply(
+                            store, customer, platform, chat_id,
+                            text=(
+                                f"🚫 Siz allaqachon <b>{existing_owned_store.name}</b> do'konining "
+                                f"egasisiz. Bitta Telegram akkount faqat bitta do'konga ega bo'la oladi."
+                            ),
+                        )
+                        ChatMessage.objects.filter(id=chat_message.id).update(
+                            processing_status=ChatMessage.ProcessingStatus.COMPLETED
+                        )
+                        return
+
+                    try:
+                        store.tg_owner_chat_id = str(sender_id)
+                        store.save(update_fields=["tg_owner_chat_id"])
+                    except IntegrityError:
+                        # Poyga holati: ikkita so'rov bir vaqtda yuqoridagi
+                        # tekshiruvdan o'tib qolishi mumkin — himoya sifatida.
+                        logger.warning(
+                            f"[Task] Egani biriktirishda poyga holati: "
+                            f"store={store.name}, sender={sender_id}"
+                        )
+                        _send_command_reply(
+                            store, customer, platform, chat_id,
+                            text="🚫 Siz allaqachon boshqa do'konning egasisiz. Bitta akkount faqat bitta do'konga ega bo'la oladi.",
+                        )
+                        ChatMessage.objects.filter(id=chat_message.id).update(
+                            processing_status=ChatMessage.ProcessingStatus.COMPLETED
+                        )
+                        return
+
                     logger.info(f"[Task] Do'kon egasi biriktirildi: store={store.name}, owner_tg_id={sender_id}")
                     is_admin = True
 
@@ -230,6 +293,7 @@ def process_incoming_message(
                     store, customer, platform, chat_id,
                     text=welcome_text,
                     reply_markup=reply_markup,
+                    is_group_message=is_group,
                 )
 
                 # Chat menu tugmasini ham shu Do'kon Egasi uchun "Dashboard"
@@ -264,13 +328,12 @@ def process_incoming_message(
                 # do'konlarda ham xuddi shu matn chiqib, mos kelmasdi
                 # (masalan o'quv markazi uchun "razmer" ma'nosiz). Endi
                 # do'konning category_type'iga qarab mos matn tanlanadi.
-                category = getattr(store, "category_type", "e_commerce") or "e_commerce"
+                category = getattr(store, "category_type", "education") or "education"
                 category_intros = {
-                    "e_commerce": "Katalogimizdagi mahsulotlar, razmerlar, narxlar va yetkazib berish bo'yicha savolingiz bo'lsa",
                     "education": "Kurslarimiz, dars jadvali, narxlar va Bepul Sinov Darsi bo'yicha savolingiz bo'lsa",
                     "services": "Xizmatlarimiz, ustalarimiz, narxlar va vaqt band qilish bo'yicha savolingiz bo'lsa",
                 }
-                intro = category_intros.get(category, category_intros["e_commerce"])
+                intro = category_intros.get(category, category_intros["education"])
 
                 customer_text = (
                     f"<b>Assalomu alaykum! {store.name} rasmiy sotuv botiga xush kelibsiz! 😊</b>\n\n"
@@ -279,6 +342,7 @@ def process_incoming_message(
                 _send_command_reply(
                     store, customer, platform, chat_id,
                     text=customer_text,
+                    is_group_message=is_group,
                 )
 
             ChatMessage.objects.filter(id=chat_message.id).update(
@@ -297,6 +361,7 @@ def process_incoming_message(
             _send_command_reply(
                 store, customer, platform, chat_id,
                 text=help_text,
+                is_group_message=is_group,
             )
             ChatMessage.objects.filter(id=chat_message.id).update(
                 processing_status=ChatMessage.ProcessingStatus.COMPLETED
@@ -334,6 +399,7 @@ def process_incoming_message(
             _send_command_reply(
                 store, customer, platform, chat_id,
                 text=voice_reply_text,
+                is_group_message=is_group,
             )
             ChatMessage.objects.filter(id=chat_message.id).update(
                 processing_status=ChatMessage.ProcessingStatus.COMPLETED
@@ -413,12 +479,13 @@ def process_incoming_message(
             store=store,
             customer=customer,
             user_message=text,
+            is_group=is_group,
         )
 
         logger.info(
             f"[Task] AI javob olindi | "
             f"tokens={ai_response.tokens_used} | "
-            f"has_order={ai_response.has_order}"
+            f"has_lead={ai_response.has_lead}"
         )
 
         # ── 5.5. AI javobini DB'ga saqlash ─────────────────────────────
@@ -449,6 +516,7 @@ def process_incoming_message(
                 "celery_task_id": self.request.id,
                 "tokens_used": ai_response.tokens_used,
                 "ai_model_used": ai_response.model_used,
+                "is_group_message": is_group,
             },
         )
 
@@ -482,28 +550,32 @@ def process_incoming_message(
             )
             # Yuborilmagan bo'lsa ham davom etamiz (buyurtma saqlash kerak)
 
-        # ── 7. Buyurtma aniqlangan bo'lsa ──────────────────────────────
-        if ai_response.has_order and ai_response.order_data:
+        # ── 7. Lid aniqlangan bo'lsa ──────────────────────────────────
+        if ai_response.has_lead and ai_response.lead_data:
             logger.info(
-                f"[Task] Buyurtma aniqlandi! "
-                f"mijoz={ai_response.order_data.get('full_name')}"
+                f"[Task] Lid aniqlandi! "
+                f"mijoz={ai_response.lead_data.get('full_name')} | "
+                f"lead_status={ai_response.lead_data.get('lead_status')}"
             )
 
-            order = create_order_from_ai_data(
+            lead = create_lead_from_ai_data(
                 store=store,
                 customer=customer,
-                order_data=ai_response.order_data,
+                lead_data=ai_response.lead_data,
                 platform=platform,
+                source="group" if is_group else "private_chat",
                 source_message=ai_message,
             )
 
-            if order:
+            if lead:
                 # Egasiga Telegram xabarnomasi
-                notify_store_owner(store=store, order=order)
+                notify_store_owner(store=store, lead=lead)
+                # Bitrix24 ulangan bo'lsa — avtomatik sinxronizatsiya
+                sync_lead_to_bitrix24(store=store, lead=lead)
             else:
                 logger.warning(
-                    f"[Task] Buyurtma aniqlandi lekin saqlanmadi! "
-                    f"data={ai_response.order_data}"
+                    f"[Task] Lid aniqlandi lekin saqlanmadi! "
+                    f"data={ai_response.lead_data}"
                 )
 
         # ── 8. Dastlabki xabarni COMPLETED deb belgilash ──────────────

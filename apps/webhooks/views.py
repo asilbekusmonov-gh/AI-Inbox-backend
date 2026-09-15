@@ -86,6 +86,15 @@ class TelegramWebhookView(View):
             # Qo'llab-quvvatlanmaydigan update turi — OK qaytaramiz
             return HttpResponse(status=200)
 
+        # 4.4 Guruhga bot "Add to Group" havolasi (?startgroup=store_<uuid>)
+        # orqali qo'shilganda, Telegram guruhga avtomatik ravishda
+        # "/start@bot store_<uuid>" xabarini yuboradi — bu ODDIY mijoz
+        # xabari emas, bog'lash buyrug'i, shuning uchun alohida (sinxron,
+        # Celery'siz) ishlanadi.
+        if message.chat_type in ("group", "supergroup") and message.text.strip().startswith("/start"):
+            self._handle_group_binding(message, bot_token)
+            return HttpResponse(status=200)
+
         # 4.5 Single Master Bot Multi-Tenant Routing (Deep-link & Session Router)
         store = self._resolve_store_for_message(message)
 
@@ -94,19 +103,24 @@ class TelegramWebhookView(View):
         # do'konning "mijozi" sifatida ro'yxatga olmaymiz — buning o'rniga
         # muloyim yo'naltiruvchi xabar yuboramiz va to'xtaymiz.
         if store is None:
-            from apps.chat.senders import send_telegram_message
-            send_telegram_message(
-                bot_token=bot_token,
-                chat_id=message.chat_id,
-                text=(
-                    "Assalomu alaykum! 😊 Bu bot faqat maxsus taklif havolasi orqali ishlaydi. "
-                    "Agar sizni biror do'kon/kurs markazi shu botga yo'naltirgan bo'lsa, "
-                    "ular yuborgan havoladan (link) qayta foydalaning."
-                ),
-            )
+            # Guruhda: bog'lanmagan (yoki hali botga tanish bo'lmagan) guruhga
+            # bu umumiy "havolasiz" xabarni yubormaymiz — begona/tasodifiy
+            # guruhda botning o'zini reklama qilishi noqulay va keraksiz.
+            # Shaxsiy chatda esa yo'naltiruvchi xabar avvalgidek yuboriladi.
+            if message.chat_type not in ("group", "supergroup"):
+                from apps.chat.senders import send_telegram_message
+                send_telegram_message(
+                    bot_token=bot_token,
+                    chat_id=message.chat_id,
+                    text=(
+                        "Assalomu alaykum! 😊 Bu bot faqat maxsus taklif havolasi orqali ishlaydi. "
+                        "Agar sizni biror do'kon/kurs markazi shu botga yo'naltirgan bo'lsa, "
+                        "ular yuborgan havoladan (link) qayta foydalaning."
+                    ),
+                )
             logger.info(
-                f"Telegram: begona foydalanuvchi (havolasiz) — hech qaysi do'konga biriktirilmadi | "
-                f"sender_id={message.sender_id}"
+                f"Telegram: begona foydalanuvchi/guruh (bog'lanmagan) — hech qaysi do'konga biriktirilmadi | "
+                f"sender_id={message.sender_id} | chat_type={message.chat_type}"
             )
             return HttpResponse(status=200)
 
@@ -139,6 +153,7 @@ class TelegramWebhookView(View):
                     "text": message.text,
                     "chat_id": message.chat_id,
                     "raw_payload": message.raw_payload,
+                    "chat_type": message.chat_type,
                 },
                 queue="messages",
                 routing_key="messages",
@@ -179,6 +194,18 @@ class TelegramWebhookView(View):
 
         text = (message.text or "").strip()
         sender_id = str(message.sender_id)
+
+        # ── Guruh xabari: bog'lash (/start) allaqachon post()'da alohida
+        # ushlangan — bu yerga faqat ODDIY guruh xabarlari yetib keladi.
+        # Yo'nalish oddiy: guruhning chat_id'si qaysi Store'ga
+        # bog'langan bo'lsa, o'sha Store qaytariladi (bog'lanmagan bo'lsa
+        # None — bot indamaydi).
+        if message.chat_type in ("group", "supergroup"):
+            return Store.objects.filter(
+                tg_group_chat_id=str(message.chat_id),
+                is_active=True,
+                is_deleted=False,
+            ).first()
 
         # 1. Deep-link /start store_<uuid> yoki /start admin_<uuid>
         if text.startswith("/start"):
@@ -241,6 +268,79 @@ class TelegramWebhookView(View):
         # keraksiz suhbatlar bilan to'ldirardi. Endi bunday holatda HECH
         # QANDAY do'konga biriktirilmaydi (None qaytariladi).
         return None
+
+    def _handle_group_binding(self, message, bot_token: str) -> None:
+        """
+        Guruhga bot "?startgroup=store_<uuid>" havolasi orqali qo'shilganda,
+        Telegram o'sha guruhga avtomatik "/start@bot store_<uuid>" xabarini
+        yuboradi — shu yerda ushlanadi va guruh shu Store'ga bog'lanadi.
+
+        ⚠️ XAVFSIZLIK: faqat do'kon EGASI (tg_owner_chat_id mos keladigan
+        Telegram foydalanuvchi) guruhni bog'lay oladi — aks holda istalgan
+        kishi (masalan raqobatchi) boshqa birovning do'koniga tasodifiy
+        yoki qasddan begona/spam guruhni bog'lab qo'yishi mumkin edi.
+        """
+        from django.db import transaction
+        from django.db.models import Q
+        from apps.chat.senders import send_telegram_message
+
+        text = message.text.strip()
+        parts = text.split()
+        if len(parts) < 2:
+            return
+
+        param = parts[1].strip()
+        target_key = param
+        for prefix in ("admin_", "store_"):
+            if param.startswith(prefix):
+                target_key = param[len(prefix):]
+                break
+
+        target_store = None
+        try:
+            target_store = Store.objects.filter(
+                Q(id=target_key) | Q(tg_owner_chat_id=target_key),
+                is_active=True,
+                is_deleted=False,
+            ).first()
+        except Exception:
+            pass
+
+        if not target_store:
+            return
+
+        sender_id = str(message.sender_id)
+        if not target_store.tg_owner_chat_id or str(target_store.tg_owner_chat_id) != sender_id:
+            logger.warning(
+                f"Telegram: guruh bog'lash rad etildi (ega emas) | "
+                f"store={target_store.name} | sender={sender_id}"
+            )
+            send_telegram_message(
+                bot_token=bot_token,
+                chat_id=message.chat_id,
+                text="🚫 Faqat do'konning haqiqiy egasi guruhni ulashi mumkin.",
+            )
+            return
+
+        chat_id = str(message.chat_id)
+        with transaction.atomic():
+            # Boshqa do'kon avval shu guruhga bog'langan bo'lsa — unique
+            # cheklovga urilmaslik uchun avval bo'shatib olamiz.
+            Store.objects.filter(tg_group_chat_id=chat_id).exclude(id=target_store.id).update(tg_group_chat_id=None)
+            Store.objects.filter(id=target_store.id).update(tg_group_chat_id=chat_id)
+
+        logger.info(f"Telegram: guruh bog'landi | store={target_store.name} | chat_id={chat_id}")
+        bot_mention = f"@{target_store.tg_bot_username}" if target_store.tg_bot_username else "botni"
+        send_telegram_message(
+            bot_token=bot_token,
+            chat_id=chat_id,
+            text=(
+                f"✅ Ushbu guruh <b>{target_store.name}</b> do'koniga muvaffaqiyatli ulandi!\n\n"
+                f"Endi a'zolar {bot_mention} belgilab yoki botning xabariga javob (reply) berib "
+                f"savol bersa, AI sotuvchi shu yerda javob beradi."
+            ),
+            parse_mode="HTML",
+        )
 
     def _get_store_by_token(self, bot_token: str) -> Store | None:
         """Bot token bo'yicha aktiv do'konni topadi"""

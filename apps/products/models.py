@@ -55,9 +55,9 @@ class Product(BaseModel):
     )
     category_type = models.CharField(
         max_length=30,
-        default="e_commerce",
+        default="education",
         db_index=True,
-        help_text="Mahsulot/Kurs/Xizmat sohasi (e_commerce, education, services)"
+        help_text="Mahsulot/Kurs/Xizmat sohasi (education, services)"
     )
     metadata = models.JSONField(
         default=dict,
@@ -92,7 +92,7 @@ class Product(BaseModel):
         if not store:
             return cls.objects.none()
 
-        cat_type = getattr(store, "category_type", "e_commerce") or "e_commerce"
+        cat_type = getattr(store, "category_type", "education") or "education"
         base_qs = cls.objects.filter(
             store=store,
             category_type=cat_type,

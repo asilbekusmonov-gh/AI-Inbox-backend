@@ -1,10 +1,21 @@
 """
 Store Views — DRF (Multi-tenant)
 """
+import logging
+
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
-from .serializers import StoreSerializer, StoreConfigUpdateSerializer, StoreOnboardingSerializer
+from rest_framework.views import APIView
+from .serializers import (
+    StoreSerializer,
+    StoreConfigUpdateSerializer,
+    StoreOnboardingSerializer,
+    OnboardingItemSerializer,
+    validate_item_metadata,
+)
 from apps.core.authentication import get_store_from_request
+
+logger = logging.getLogger("apps.stores")
 
 
 class StoreDetailUpdateView(generics.RetrieveUpdateAPIView):
@@ -60,7 +71,68 @@ class StoreOnboardingView(generics.UpdateAPIView):
         return Response(StoreSerializer(instance).data, status=status.HTTP_200_OK)
 
 
-from rest_framework.views import APIView
+class CatalogParseView(APIView):
+    """
+    Egasi bir martalik yozgan erkin matndagi katalog tavsifini (barcha
+    kurs/mahsulot/xizmatlar) AI orqali onboarding "items" formatiga mos
+    strukturaviy ro'yxatga aylantiradi.
+
+    ⚠️ Bu FAQAT bir martalik qoralama tayyorlash vositasi — natija
+    saqlanmaydi. Frontend qaytgan ro'yxatni owner'ga ko'rsatib,
+    tahrirlatib, keyin StoreOnboardingView (PUT/PATCH /store/onboarding/)
+    orqali saqlashi kerak. Shu sababli bu yerdagi AI xatosi hech qachon
+    to'g'ridan-to'g'ri bazaga yoki mijozga yetib bormaydi.
+
+    POST /api/v1/store/parse-catalog/
+    Body: {"text": "...", "category_type": "education"}  # category_type ixtiyoriy
+    Response: {"items": [...]}  # OnboardingItemSerializer formatida
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        store = get_store_from_request(request)
+        if not store:
+            return Response({"error": "Do'kon topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        text = (request.data.get("text") or "").strip()
+        if not text:
+            return Response({"error": "Matn kiritilmagan"}, status=status.HTTP_400_BAD_REQUEST)
+
+        category_type = request.data.get("category_type") or getattr(store, "category_type", "education")
+
+        from apps.products.ai_service import parse_catalog_text
+
+        try:
+            raw_items = parse_catalog_text(text, category_type)
+        except Exception as e:
+            logger.error(f"[Catalog Parse] AI tahlil xatosi: {e} | store={store.name}", exc_info=True)
+            return Response(
+                {"error": "AI katalogni tahlil qila olmadi. Birozdan so'ng qayta urinib ko'ring."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        if not raw_items:
+            return Response({"items": []}, status=status.HTTP_200_OK)
+
+        # AI ba'zan bitta elementda xato qilishi mumkin — butun natijani
+        # rad etish o'rniga, faqat noto'g'ri elementlarni tashlab, qolgan
+        # to'g'rilarini qaytaramiz (owner baribir hammasini ko'rib chiqadi).
+        valid_items = []
+        for item in raw_items:
+            item_serializer = OnboardingItemSerializer(data=item)
+            if not item_serializer.is_valid():
+                logger.warning(f"[Catalog Parse] Noto'g'ri element tashlab yuborildi: {item} | xato={item_serializer.errors}")
+                continue
+            try:
+                validate_item_metadata(category_type, item_serializer.validated_data.get("metadata", {}))
+            except Exception as e:
+                logger.warning(f"[Catalog Parse] Noto'g'ri metadata tashlab yuborildi: {item} | xato={e}")
+                continue
+            valid_items.append(item_serializer.validated_data)
+
+        return Response({"items": valid_items}, status=status.HTTP_200_OK)
+
+
 from django.conf import settings
 import httpx
 
@@ -80,14 +152,12 @@ class SuperAdminStatsView(APIView):
 
     def get(self, request):
         from apps.stores.models import Store
-        from apps.orders.models import Order
+        from apps.orders.models import Lead
         from apps.customers.models import Customer
-        from django.db.models import Sum
 
         total_stores = Store.objects.filter(is_deleted=False).count()
         active_stores = Store.objects.filter(is_active=True, is_deleted=False).count()
-        total_orders = Order.objects.filter(is_deleted=False).count()
-        total_revenue = Order.objects.filter(is_deleted=False, status__in=["confirmed", "completed"]).aggregate(s=Sum("total_amount"))["s"] or 0
+        total_leads = Lead.objects.filter(is_deleted=False).count()
         total_customers = Customer.objects.filter(is_deleted=False).count()
 
         # Bot health check
@@ -109,25 +179,22 @@ class SuperAdminStatsView(APIView):
         stores_qs = Store.objects.filter(is_deleted=False).order_by("-created_at")
         stores_list = []
         for s in stores_qs:
-            st_orders = Order.objects.filter(store=s, is_deleted=False).count()
-            st_rev = Order.objects.filter(store=s, is_deleted=False, status__in=["confirmed", "completed"]).aggregate(s=Sum("total_amount"))["s"] or 0
+            st_leads = Lead.objects.filter(store=s, is_deleted=False).count()
             stores_list.append({
                 "id": str(s.id),
                 "name": s.name,
-                "category_type": getattr(s, "category_type", "e_commerce"),
+                "category_type": getattr(s, "category_type", "education"),
                 "is_active": s.is_active,
                 "ai_active": s.ai_active,
                 "tg_owner_chat_id": s.tg_owner_chat_id or "Nokalit",
-                "total_orders": st_orders,
-                "total_revenue": st_rev,
+                "total_leads": st_leads,
                 "created_at": s.created_at.strftime("%Y-%m-%d %H:%M")
             })
 
         return Response({
             "total_stores": total_stores,
             "active_stores": active_stores,
-            "total_orders": total_orders,
-            "total_revenue": total_revenue,
+            "total_leads": total_leads,
             "total_customers": total_customers,
             "bot_active": bot_active,
             "bot_username": f"@{bot_username}" if bot_username != "unknown" else None,

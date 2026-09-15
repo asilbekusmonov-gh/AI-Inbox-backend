@@ -10,8 +10,8 @@ Do'konning barcha ma'lumotlari (mahsulotlar, buyurtmalar, mijozlar
 tarixi) saqlanib qoladi — keyinchalik qayta yoqish mumkin.
 
 Ishlatish:
-python manage.py set_store_access --store "Zulfiya Fashion" --active false
-python manage.py set_store_access --store "Zulfiya Fashion" --active true
+python manage.py set_store_access --store "Najot Ta'lim" --active false
+python manage.py set_store_access --store "Najot Ta'lim" --active true
 """
 from django.core.management.base import BaseCommand
 

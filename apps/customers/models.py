@@ -66,9 +66,9 @@ class Customer(BaseModel):
     )
 
     # ── Statistika ─────────────────────────────────────────────
-    total_orders = models.IntegerField(
+    total_leads = models.IntegerField(
         default=0,
-        help_text="Jami buyurtmalar soni (kesh — tez hisoblash uchun)"
+        help_text="Jami lidlar soni (kesh — tez hisoblash uchun)"
     )
     last_message_at = models.DateTimeField(
         blank=True,

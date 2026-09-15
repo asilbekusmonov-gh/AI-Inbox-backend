@@ -8,8 +8,8 @@ yo'q, shuning uchun bu operator tomonidan bajariladi), so'ng darhol
 egasiga yuboriladigan tayyor admin havolasini chiqaradi.
 
 Ishlatish:
-python manage.py create_store --name "Zulfiya Fashion" --category e_commerce
 python manage.py create_store --name "Najot Ta'lim" --category education
+python manage.py create_store --name "Beauty Studio" --category services
 """
 import uuid
 
@@ -29,14 +29,14 @@ class Command(BaseCommand):
             "--name",
             type=str,
             required=True,
-            help="Do'kon nomi (masalan: 'Zulfiya Fashion')",
+            help="Do'kon nomi (masalan: 'Najot Ta'lim')",
         )
         parser.add_argument(
             "--category",
             type=str,
             choices=[c.value for c in Store.CategoryType],
-            default=Store.CategoryType.E_COMMERCE,
-            help="Biznes sohasi: e_commerce | education | services (standart: e_commerce)",
+            default=Store.CategoryType.EDUCATION,
+            help="Biznes sohasi: education | services (standart: education)",
         )
         parser.add_argument(
             "--bot_username",

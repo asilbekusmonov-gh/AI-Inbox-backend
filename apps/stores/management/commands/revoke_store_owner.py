@@ -13,7 +13,7 @@ create_store orqali olingan) yana ishlatilishi mumkin — yangi link kerak
 emas, chunki u do'kon ID'siga bog'langan, eski egaga emas.
 
 Ishlatish:
-python manage.py revoke_store_owner --store "Zulfiya Fashion"
+python manage.py revoke_store_owner --store "Najot Ta'lim"
 python manage.py revoke_store_owner --store "<store-uuid>"
 """
 from django.core.management.base import BaseCommand

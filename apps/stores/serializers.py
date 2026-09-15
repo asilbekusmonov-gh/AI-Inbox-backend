@@ -20,6 +20,8 @@ class StoreSerializer(serializers.ModelSerializer):
     # Frontend "telegram_connected" / "instagram_connected" nomlarini kutadi
     telegram_connected = serializers.SerializerMethodField()
     instagram_connected = serializers.SerializerMethodField()
+    bitrix24_connected = serializers.SerializerMethodField()
+    telegram_group_connected = serializers.SerializerMethodField()
 
     class Meta:
         model = Store
@@ -40,6 +42,8 @@ class StoreSerializer(serializers.ModelSerializer):
             "is_active",
             "telegram_connected",
             "instagram_connected",
+            "bitrix24_connected",
+            "telegram_group_connected",
             "tg_bot_username",
             "created_at",
             "updated_at",
@@ -55,8 +59,14 @@ class StoreSerializer(serializers.ModelSerializer):
     def get_telegram_connected(self, obj) -> bool:
         return obj.has_telegram
 
+    def get_telegram_group_connected(self, obj) -> bool:
+        return obj.has_telegram_group
+
     def get_instagram_connected(self, obj) -> bool:
         return obj.has_instagram
+
+    def get_bitrix24_connected(self, obj) -> bool:
+        return obj.has_bitrix24
 
 
 class StoreConfigUpdateSerializer(serializers.ModelSerializer):
@@ -89,20 +99,20 @@ class StoreConfigUpdateSerializer(serializers.ModelSerializer):
             "ai_temperature",
             "ig_page_id",
             "ig_access_token",
+            "bitrix24_webhook_url",
         ]
         extra_kwargs = {
             "ig_access_token": {"write_only": True},
+            # ⚠️ Webhook manzili maxfiy token'ni o'z ichiga oladi (masalan
+            # https://company.bitrix24.com/rest/1/xxxxxxxx/) — ig_access_token
+            # kabi write_only qilib qo'yildi, GET so'rovida qaytmaydi.
+            # Ulanganligini tekshirish uchun StoreSerializer'dagi
+            # "bitrix24_connected" (bool) dan foydalaniladi.
+            "bitrix24_webhook_url": {"write_only": True},
         }
 
 
 # ── METADATA VALIDATORLAR ────────────────────────────────────
-
-class ECommerceMetadataSerializer(serializers.Serializer):
-    sizes = serializers.ListField(child=serializers.CharField(), required=False)
-    colors = serializers.ListField(child=serializers.CharField(), required=False)
-    brand = serializers.CharField(required=False, allow_blank=True)
-    delivery_available = serializers.BooleanField(default=True)
-
 
 class EducationMetadataSerializer(serializers.Serializer):
     duration_months = serializers.IntegerField(min_value=1, required=False)
@@ -118,6 +128,27 @@ class ServicesMetadataSerializer(serializers.Serializer):
     specialists = serializers.ListField(child=serializers.CharField(), required=False)
     available_hours = serializers.ListField(child=serializers.CharField(), required=False)
     location = serializers.CharField(required=False, allow_blank=True)
+
+
+METADATA_SERIALIZERS = {
+    Store.CategoryType.EDUCATION: EducationMetadataSerializer,
+    Store.CategoryType.SERVICES: ServicesMetadataSerializer,
+}
+
+
+def validate_item_metadata(category_type: str, metadata: dict) -> dict:
+    """
+    Berilgan `metadata` dict'ini `category_type`ga mos metadata
+    serializeri orqali tekshiradi va tozalangan (validated) qiymatni
+    qaytaradi. Noma'lum category_type yoki noto'g'ri metadata uchun
+    `serializers.ValidationError` ko'taradi.
+    """
+    serializer_cls = METADATA_SERIALIZERS.get(category_type)
+    if serializer_cls is None:
+        raise serializers.ValidationError({"category_type": "Noma'lum biznes kategoriyasi."})
+    serializer = serializer_cls(data=metadata or {})
+    serializer.is_valid(raise_exception=True)
+    return serializer.validated_data
 
 
 class OnboardingItemSerializer(serializers.Serializer):
@@ -149,25 +180,14 @@ class StoreOnboardingSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        category_type = attrs.get("category_type") or getattr(self.instance, "category_type", Store.CategoryType.E_COMMERCE)
+        category_type = attrs.get("category_type") or getattr(self.instance, "category_type", Store.CategoryType.EDUCATION)
         items = attrs.get("items", [])
 
         for idx, item in enumerate(items):
-            meta_data = item.get("metadata", {})
-            
-            if category_type == Store.CategoryType.E_COMMERCE:
-                serializer = ECommerceMetadataSerializer(data=meta_data)
-            elif category_type == Store.CategoryType.EDUCATION:
-                serializer = EducationMetadataSerializer(data=meta_data)
-            elif category_type == Store.CategoryType.SERVICES:
-                serializer = ServicesMetadataSerializer(data=meta_data)
-            else:
-                raise serializers.ValidationError({"category_type": "Noma'lum biznes kategoriyasi."})
-
-            if not serializer.is_valid():
-                raise serializers.ValidationError({
-                    f"items[{idx}].metadata": serializer.errors
-                })
+            try:
+                validate_item_metadata(category_type, item.get("metadata", {}))
+            except serializers.ValidationError as e:
+                raise serializers.ValidationError({f"items[{idx}].metadata": e.detail})
 
         return attrs
 

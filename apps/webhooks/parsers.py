@@ -17,6 +17,7 @@ Instagram xabar turlari (Task 2):
   - quick_reply   : Quick Reply tugmasini bosish
 """
 import logging
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -36,6 +37,10 @@ class IncomingMessage:
     text: str               # Xabar matni (media bo'lsa — tavsif)
     chat_id: str            # Javob yuborish uchun chat ID
     raw_payload: dict       # To'liq original payload (debug uchun)
+
+    # Telegram chat turi: "private" | "group" | "supergroup" | "channel"
+    # (Instagram uchun har doim "private")
+    chat_type: str = "private"
 
     # ── Media ma'lumotlari (Instagram media xabarlari uchun) ──
     media_url: Optional[str] = None        # Media faylining URL'i (rasm, video, audio)
@@ -103,7 +108,20 @@ def parse_telegram_payload(payload: dict) -> Optional[IncomingMessage]:
             return None
 
         message_id = str(message.get("message_id", ""))
-        chat_id = str(message.get("chat", {}).get("id", sender_id))
+        chat = message.get("chat", {})
+        chat_id = str(chat.get("id", sender_id))
+        chat_type = chat.get("type", "private")
+
+        # Guruhda AI'ga qaratilgan xabarlar odatda "@bot_username savol..."
+        # shaklida keladi (Telegram Privacy Mode shunday yuboradi) — bu
+        # @mention'ni AI'ga yuborishdan oldin tozalab olamiz, aks holda
+        # AI xom "@bot_username" tokenini ham matn qismi deb tushunishi
+        # mumkin.
+        if chat_type in ("group", "supergroup"):
+            text = re.sub(r"^@\w+\s*", "", text).strip()
+            if not text:
+                logger.debug("Telegram: guruh xabari faqat @mention'dan iborat, bo'sh qoldi.")
+                return None
 
         # ⚠️ BUG FIX: avval @username bo'lmasa, "ism" ("first_name")
         # to'g'ridan-to'g'ri `username` maydoniga solib qo'yilardi — bu
@@ -126,6 +144,7 @@ def parse_telegram_payload(payload: dict) -> Optional[IncomingMessage]:
             text=text,
             chat_id=chat_id,
             raw_payload=payload,
+            chat_type=chat_type,
         )
 
     except (KeyError, TypeError, AttributeError) as e:

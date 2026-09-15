@@ -94,6 +94,16 @@ class ChatMessage(BaseModel):
         null=True,
         help_text="Ovozli xabar davomiyligi (masalan: 0:15)"
     )
+    is_group_message = models.BooleanField(
+        default=False,
+        db_index=True,
+        # ⚠️ Bir xil Customer shaxsiy chatda ham, do'konning bog'langan
+        # Telegram guruhida ham yozishi mumkin — suhbat tarixi (AI
+        # kontekst uchun) ikkalasini ARALASHTIRMASLIGI kerak, aks holda
+        # shaxsiy chatdagi maxfiy tafsilotlar AI orqali ommaviy guruhga
+        # "sizib chiqishi" mumkin edi. Shu bayroq ikkalasini ajratadi.
+        help_text="Ushbu xabar do'konga bog'langan Telegram guruhidan keldimi (shaxsiy chat emas)"
+    )
 
     # ── Qayta ishlash holati ───────────────────────────────────
     processing_status = models.CharField(

@@ -2,7 +2,7 @@
 Store (Do'kon) modeli — Multi-tenant tizimning asosi.
 
 Har bir do'kon egasi o'zining Store obyektiga ega.
-Barcha boshqa modellar (Customer, ChatMessage, Order)
+Barcha boshqa modellar (Customer, ChatMessage, Lead)
 shu Store'ga Foreign Key orqali bog'lanadi.
 """
 from django.db import models
@@ -30,7 +30,6 @@ class Store(BaseModel):
         ENTERPRISE = "enterprise", "Korporativ"
 
     class CategoryType(models.TextChoices):
-        E_COMMERCE = "e_commerce", "E-commerce (Kiyim-kechak, kosmetika, do'konlar)"
         EDUCATION = "education", "Ta'lim (O'quv markazlari, kurslar)"
         SERVICES = "services", "Xizmat ko'rsatish (Go'zallik salonlari, klinikalar, va h.k.)"
 
@@ -43,7 +42,7 @@ class Store(BaseModel):
     )
     name = models.CharField(
         max_length=255,
-        help_text="Do'kon nomi (masalan: 'Zulfiya Fashion')"
+        help_text="Do'kon nomi (masalan: 'Najot Ta'lim')"
     )
     description = models.TextField(
         blank=True,
@@ -65,7 +64,7 @@ class Store(BaseModel):
     category_type = models.CharField(
         max_length=30,
         choices=CategoryType.choices,
-        default=CategoryType.E_COMMERCE,
+        default=CategoryType.EDUCATION,
         help_text="Biznes sohasi/kategoriyasi"
     )
 
@@ -98,7 +97,7 @@ class Store(BaseModel):
         max_length=100,
         blank=True,
         null=True,
-        help_text="Bot username (masalan: @ZulfiyaShopBot)"
+        help_text="Bot username (masalan: @NajotTalimBot)"
     )
     tg_owner_chat_id = models.CharField(
         max_length=50,
@@ -114,6 +113,25 @@ class Store(BaseModel):
         # mustasno — faqat haqiqiy (bo'sh bo'lmagan) qiymatlar orasida
         # takrorlanishning oldi olinadi.
         help_text="Do'kon egasining shaxsiy Telegram chat_id (xabarnoma uchun)"
+    )
+    tg_group_chat_id = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        unique=True,
+        # ⚠️ tg_owner_chat_id bilan bir xil xavfsizlik sababi: unique
+        # cheklovsiz, ikki do'kon bir xil guruhga bog'lansa,
+        # `Store.objects.get(tg_group_chat_id=...)` chaqirilganda
+        # `MultipleObjectsReturned` bilan qulashi mumkin edi.
+        help_text="Ushbu do'konga bog'langan Telegram guruh chat_id (agar bog'langan bo'lsa)"
+    )
+
+    # ── Bitrix24 integratsiyasi ─────────────────────────────────
+    bitrix24_webhook_url = models.CharField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="Bitrix24 inbound webhook manzili (masalan: https://company.bitrix24.com/rest/1/xxxxxxxx/) — yangi lidlar avtomatik shu yerga yuboriladi"
     )
 
     # ── AI sozlamalari ─────────────────────────────────────────
@@ -186,3 +204,13 @@ class Store(BaseModel):
     def has_telegram(self) -> bool:
         """Telegram ulangan va aktiv"""
         return bool(self.tg_bot_token)
+
+    @property
+    def has_bitrix24(self) -> bool:
+        """Bitrix24 webhook ulangan"""
+        return bool(self.bitrix24_webhook_url)
+
+    @property
+    def has_telegram_group(self) -> bool:
+        """Telegram guruh bog'langan"""
+        return bool(self.tg_group_chat_id)

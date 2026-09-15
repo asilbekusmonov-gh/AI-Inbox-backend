@@ -17,7 +17,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.customers.models import Customer
-from apps.orders.models import Order
+from apps.orders.models import Lead
 from apps.products.models import Product
 from apps.stores.models import Store
 
@@ -38,41 +38,32 @@ class TenantIsolationTestCase(APITestCase):
             full_name="Mijoz B",
         )
 
-        self.order_a = Order.objects.create(
-            store=self.store_a, customer=self.customer_a, platform=Order.Platform.TELEGRAM,
-            customer_full_name="Mijoz A", customer_phone="+998900000001", delivery_address="A manzil",
+        self.lead_a = Lead.objects.create(
+            store=self.store_a, customer=self.customer_a, platform=Lead.Platform.TELEGRAM,
+            customer_full_name="Mijoz A", customer_phone="+998900000001",
         )
-        self.order_b = Order.objects.create(
-            store=self.store_b, customer=self.customer_b, platform=Order.Platform.TELEGRAM,
-            customer_full_name="Mijoz B", customer_phone="+998900000002", delivery_address="B manzil",
+        self.lead_b = Lead.objects.create(
+            store=self.store_b, customer=self.customer_b, platform=Lead.Platform.TELEGRAM,
+            customer_full_name="Mijoz B", customer_phone="+998900000002",
         )
 
         self.product_a = Product.objects.create(store=self.store_a, name="Mahsulot A")
         self.product_b = Product.objects.create(store=self.store_b, name="Mahsulot B")
 
-    # ── Orders ──────────────────────────────────────────────────
-    def test_order_list_only_shows_own_store(self):
+    # ── Leads ───────────────────────────────────────────────────
+    def test_lead_list_only_shows_own_store(self):
         self.client.force_authenticate(user=self.owner_a)
         response = self.client.get("/api/v1/orders/?show_all=1")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         ids = [row["id"] for row in response.data["results"]]
-        self.assertIn(str(self.order_a.id), ids)
-        self.assertNotIn(str(self.order_b.id), ids)
+        self.assertIn(str(self.lead_a.id), ids)
+        self.assertNotIn(str(self.lead_b.id), ids)
 
-    def test_cannot_retrieve_another_stores_order_by_id(self):
+    def test_cannot_retrieve_another_stores_lead_by_id(self):
         self.client.force_authenticate(user=self.owner_a)
-        response = self.client.get(f"/api/v1/orders/{self.order_b.id}/")
+        response = self.client.get(f"/api/v1/orders/{self.lead_b.id}/")
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-
-    def test_cannot_change_another_stores_order_status(self):
-        self.client.force_authenticate(user=self.owner_a)
-        response = self.client.patch(
-            f"/api/v1/orders/{self.order_b.id}/update-status/", {"status": "completed"},
-        )
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-        self.order_b.refresh_from_db()
-        self.assertEqual(self.order_b.status, Order.Status.NEW)
 
     # ── Products ────────────────────────────────────────────────
     def test_product_list_only_shows_own_store(self):

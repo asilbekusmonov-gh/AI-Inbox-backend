@@ -1,30 +1,45 @@
 """
-Order (Buyurtma) modeli — Multi-tenant, Soft Delete.
+Lead (Lid) modeli — Multi-tenant, Soft Delete.
 
-AI mijozdan ism, raqam va manzil olgandan so'ng
-avtomatik yaratiladi va do'kon egasiga xabar yuboriladi.
+AI mijozdan ism va telefon raqamini olgandan so'ng avtomatik yaratiladi,
+do'kon egasiga xabar yuboriladi, va (keyingi bosqichda) Excel/Bitrix24'ga
+eksport qilinadi. Bu loyiha ICHKI buyurtma/holat boshqaruv tizimi EMAS —
+faqat lidni yig'ish va aniq/sovuq deb belgilash uchun.
 """
 from django.db import models
 from apps.core.models import BaseModel
 
 
-class Order(BaseModel):
+class Lead(BaseModel):
     """
-    Buyurtma modeli.
+    Lid (potensial mijoz) modeli.
 
     Yaratilish jarayoni:
-    1. AI mijozdan to'liq ma'lumot oladi
+    1. AI mijozdan ism, telefon va (ixtiyoriy) qiziqqan kurs/xizmatni oladi
     2. JSON parse qilinadi
-    3. Yangi Order yaratiladi (status=NEW)
+    3. Yangi Lead yaratiladi (lead_status=UNQUALIFIED, keyin AI baholaydi)
     4. Do'kon egasiga Telegram xabarnomasi yuboriladi
-    5. Egasi TWA'da buyurtmani ko'rib, holatini yangilaydi
+    5. (Keyingi bosqich) Excel yoki Bitrix24'ga eksport qilinadi
+
+    ⚠️ Bu yerda ATAYLAB yo'q: buyurtma holati (yangi/tasdiqlangan/yakunlangan),
+    summasi, yetkazib berish manzili — bular e-commerce/CRM tushunchalari,
+    loyiha pivotidan keyin ATAYLAB olib tashlangan.
     """
 
-    class Status(models.TextChoices):
-        NEW = "new", "Yangi"
-        CONFIRMED = "confirmed", "Tasdiqlangan"
-        COMPLETED = "completed", "Yakunlangan"
-        CANCELLED = "cancelled", "Bekor qilindi"
+    class LeadStatus(models.TextChoices):
+        UNQUALIFIED = "unqualified", "Aniqlanmagan"
+        WARM = "warm", "Iliq"
+        COLD = "cold", "Sovuq"
+
+    class Source(models.TextChoices):
+        PRIVATE_CHAT = "private_chat", "Shaxsiy chat"
+        GROUP = "group", "Telegram guruh"
+        AD = "ad", "Reklama"
+
+    class ExportStatus(models.TextChoices):
+        NONE = "none", "Eksport qilinmagan"
+        EXCEL = "excel", "Excel"
+        BITRIX24 = "bitrix24", "Bitrix24"
 
     class Platform(models.TextChoices):
         INSTAGRAM = "instagram", "Instagram"
@@ -34,85 +49,77 @@ class Order(BaseModel):
     store = models.ForeignKey(
         "stores.Store",
         on_delete=models.CASCADE,
-        related_name="orders",
-        help_text="Qaysi do'konga tegishli buyurtma"
+        related_name="leads",
+        help_text="Qaysi do'konga tegishli lid"
     )
     customer = models.ForeignKey(
         "customers.Customer",
-        on_delete=models.PROTECT,   # Mijoz o'chirilsa buyurtma yo'qolmasin
-        related_name="orders",
-        help_text="Buyurtma bergan mijoz"
+        on_delete=models.PROTECT,   # Mijoz o'chirilsa lid yo'qolmasin
+        related_name="leads",
+        help_text="Lidni bergan mijoz"
     )
 
-    # ── Buyurtma raqami ────────────────────────────────────────
-    order_number = models.CharField(
+    # ── Lid raqami ─────────────────────────────────────────────
+    lead_number = models.CharField(
         max_length=50,
         unique=True,
-        help_text="Insonlarga qulay buyurtma raqami (masalan: ORD-2024-001)"
+        help_text="Insonlarga qulay lid raqami (masalan: LEAD-20260915-00001)"
     )
     platform = models.CharField(
         max_length=20,
         choices=Platform.choices,
-        help_text="Buyurtma qaysi platforma orqali keldi"
+        help_text="Lid qaysi platforma orqali keldi"
     )
-    is_voice_order = models.BooleanField(
-        default=False,
-        help_text="Mijoz ovozli muloqotni afzal ko'rishi yoki ovoz orqali berilgan buyurtma"
+    source = models.CharField(
+        max_length=20,
+        choices=Source.choices,
+        default=Source.PRIVATE_CHAT,
+        help_text="Lid qaysi kanaldan kelgani (shaxsiy chat, guruh, reklama)"
     )
 
-    # ── Yetkazib berish ma'lumotlari (AI tomonidan olingan) ────
+    # ── Mijoz ma'lumotlari (AI tomonidan olingan) ──────────────
     customer_full_name = models.CharField(
         max_length=255,
-        help_text="Buyurtmadagi ism-familya"
+        help_text="Mijozning ism-familyasi"
     )
     customer_phone = models.CharField(
         max_length=20,
-        help_text="Buyurtmadagi telefon raqam"
+        help_text="Mijozning telefon raqami"
     )
-    delivery_address = models.TextField(
-        help_text="Yetkazib berish manzili"
-    )
-
-    # ── Buyurtma detallari ─────────────────────────────────────
-    items = models.JSONField(
-        default=list,
-        help_text=(
-            "Buyurtma elementlari ro'yxati. "
-            "Format: [{'name': 'Mahsulot', 'qty': 1, 'price': 50000}]"
-        )
+    interested_course = models.ForeignKey(
+        "products.Product",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="interested_leads",
+        help_text="Mijoz qiziqqan kurs/mahsulot/xizmat (aniqlangan bo'lsa)"
     )
     notes = models.TextField(
         blank=True,
         null=True,
-        help_text="Qo'shimcha izoh (mijoz yoki egasi tomonidan)"
+        help_text="Qo'shimcha izoh (AI yoki egasi tomonidan)"
     )
 
-    # ── Moliyaviy ──────────────────────────────────────────────
-    total_amount = models.DecimalField(
-        max_digits=12,
-        decimal_places=2,
-        default=0,
-        help_text="Jami summa (so'm)"
-    )
-    delivery_fee = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=0,
-        help_text="Yetkazib berish narxi"
-    )
-
-    # ── Holat ──────────────────────────────────────────────────
-    status = models.CharField(
+    # ── Baholash (AI qiladi) ────────────────────────────────────
+    lead_status = models.CharField(
         max_length=20,
-        choices=Status.choices,
-        default=Status.NEW,
+        choices=LeadStatus.choices,
+        default=LeadStatus.UNQUALIFIED,
         db_index=True,
-        help_text="Buyurtma holati"
+        help_text="AI suhbat asosida baholagan lid holati"
     )
-    status_changed_at = models.DateTimeField(
+
+    # ── Tashqi CRM eksport ──────────────────────────────────────
+    exported_to = models.CharField(
+        max_length=20,
+        choices=ExportStatus.choices,
+        default=ExportStatus.NONE,
+        help_text="Lid qayerga eksport qilingani"
+    )
+    exported_at = models.DateTimeField(
         blank=True,
         null=True,
-        help_text="Holat oxirgi o'zgargan vaqt"
+        help_text="Eksport qilingan vaqt"
     )
 
     # ── AI xabar bog'lanishi ───────────────────────────────────
@@ -121,8 +128,8 @@ class Order(BaseModel):
         on_delete=models.SET_NULL,
         blank=True,
         null=True,
-        related_name="orders",
-        help_text="Buyurtmani yaratgan AI xabari"
+        related_name="leads",
+        help_text="Lidni yaratgan AI xabari"
     )
 
     # ── Xabarnoma ──────────────────────────────────────────────
@@ -137,90 +144,34 @@ class Order(BaseModel):
     )
 
     class Meta:
-        verbose_name = "Buyurtma"
-        verbose_name_plural = "Buyurtmalar"
+        verbose_name = "Lid"
+        verbose_name_plural = "Lidlar"
         ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["store", "status"], name="order_store_status_idx"),
-            models.Index(fields=["store", "created_at"], name="order_store_created_idx"),
-            models.Index(fields=["store", "customer"], name="order_store_customer_idx"),
-            models.Index(fields=["order_number"], name="order_number_idx"),
-            models.Index(fields=["owner_notified"], name="order_notified_idx"),
+            models.Index(fields=["store", "lead_status"], name="lead_store_status_idx"),
+            models.Index(fields=["store", "created_at"], name="lead_store_created_idx"),
+            models.Index(fields=["store", "customer"], name="lead_store_customer_idx"),
+            models.Index(fields=["lead_number"], name="lead_number_idx"),
+            models.Index(fields=["owner_notified"], name="lead_notified_idx"),
         ]
 
     def __str__(self):
-        return f"{self.order_number} — {self.customer_full_name} [{self.status}]"
+        return f"{self.lead_number} — {self.customer_full_name} [{self.get_lead_status_display()}]"
 
     def save(self, *args, **kwargs):
-        """Buyurtma raqamini avtomatik generatsiya qiladi"""
-        if not self.order_number:
-            self.order_number = self._generate_order_number()
+        """Lid raqamini avtomatik generatsiya qiladi"""
+        if not self.lead_number:
+            self.lead_number = self._generate_lead_number()
         super().save(*args, **kwargs)
 
-    def _generate_order_number(self) -> str:
+    def _generate_lead_number(self) -> str:
         """
-        Insonlarga qulay buyurtma raqami hosil qiladi.
-        Format: ORD-YYYYMMDD-XXXXX
+        Insonlarga qulay lid raqami hosil qiladi.
+        Format: LEAD-YYYYMMDD-XXXXX
         """
         from django.utils import timezone
         import random
         import string
         date_str = timezone.now().strftime("%Y%m%d")
         random_part = "".join(random.choices(string.digits, k=5))
-        return f"ORD-{date_str}-{random_part}"
-
-    def update_status(self, new_status: str):
-        """
-        Buyurtma holatini yangilaydi va vaqtni qayd etadi.
-        Agar buyurtma bekor qilinsa (cancelled), mahsulotlar stokini omborga qaytaradi.
-        """
-        from django.utils import timezone
-        old_status = self.status
-        self.status = new_status
-        self.status_changed_at = timezone.now()
-        self.save(update_fields=["status", "status_changed_at", "updated_at"])
-
-        # Bekor qilinganda stokni qaytarish
-        if new_status == self.Status.CANCELLED and old_status != self.Status.CANCELLED:
-            self._restock_items()
-
-
-
-    def _restock_items(self):
-        """Buyurtmadagi mahsulotlar stokini omborga qaytaradi"""
-        from apps.products.models import Product
-        if not self.items or not isinstance(self.items, list):
-            return
-
-        for item in self.items:
-            prod_id = item.get("id") or item.get("product_id")
-            qty = item.get("qty") or item.get("quantity") or 1
-            if prod_id:
-                try:
-                    product = Product.objects.get(id=prod_id, store=self.store)
-                    product.stock += int(qty)
-                    product.save(update_fields=["stock", "updated_at"])
-                except (Product.DoesNotExist, ValueError):
-                    pass
-
-    def _deduct_stock_items(self):
-        """
-        Buyurtma yaratilganda mos mahsulotlarning ombordagi sonini
-        kamaytiradi (`_restock_items()` bilan simmetrik juftlik —
-        bekor qilinganda qaytaradi, yaratilganda kamaytiradi).
-        Stok 0 dan pastga tushmaydi (himoya).
-        """
-        from apps.products.models import Product
-        if not self.items or not isinstance(self.items, list):
-            return
-
-        for item in self.items:
-            prod_id = item.get("id") or item.get("product_id")
-            qty = item.get("qty") or item.get("quantity") or 1
-            if prod_id:
-                try:
-                    product = Product.objects.get(id=prod_id, store=self.store)
-                    product.stock = max(0, product.stock - int(qty))
-                    product.save(update_fields=["stock", "updated_at"])
-                except (Product.DoesNotExist, ValueError):
-                    pass
+        return f"LEAD-{date_str}-{random_part}"

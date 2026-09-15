@@ -9,7 +9,7 @@ UUID qaysi do'konga tegishli ekanini shu buyruq orqali bilib olasiz.
 
 Ishlatish:
 python manage.py list_stores
-python manage.py list_stores --name "Zulfiya"
+python manage.py list_stores --name "Najot"
 """
 from django.core.management.base import BaseCommand
 
@@ -29,7 +29,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         from apps.products.models import Product
-        from apps.orders.models import Order
+        from apps.orders.models import Lead
 
         qs = Store.objects.filter(is_deleted=False).order_by("name", "-created_at")
         name_filter = options.get("name")
@@ -44,7 +44,7 @@ class Command(BaseCommand):
         self.stdout.write("")
         for store in stores:
             product_count = Product.objects.filter(store=store, is_deleted=False).count()
-            order_count = Order.objects.filter(store=store, is_deleted=False).count()
+            lead_count = Lead.objects.filter(store=store, is_deleted=False).count()
             owner_status = (
                 f"✅ ega bor (tg_id={store.tg_owner_chat_id})"
                 if store.tg_owner_chat_id
@@ -58,5 +58,5 @@ class Command(BaseCommand):
             self.stdout.write(f"   Holat: {active_status}")
             self.stdout.write(f"   Ega: {owner_status}")
             self.stdout.write(f"   Yaratilgan: {store.created_at.strftime('%Y-%m-%d %H:%M')}")
-            self.stdout.write(f"   Mahsulot/kurs soni: {product_count} | Buyurtma soni: {order_count}")
+            self.stdout.write(f"   Mahsulot/kurs soni: {product_count} | Lid soni: {lead_count}")
             self.stdout.write("")

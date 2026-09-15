@@ -41,7 +41,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         if not target_store:
             return Product.objects.none()
 
-        cat_type = self.request.query_params.get("category_type") or getattr(target_store, "category_type", "e_commerce")
+        cat_type = self.request.query_params.get("category_type") or getattr(target_store, "category_type", "education")
         return Product.objects.filter(store=target_store, category_type=cat_type, is_deleted=False)
 
     def perform_create(self, serializer):
@@ -50,7 +50,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         if not target_store:
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("Do'kon topilmadi")
-        cat_type = self.request.data.get("category_type") or getattr(target_store, "category_type", "e_commerce")
+        cat_type = self.request.data.get("category_type") or getattr(target_store, "category_type", "education")
         serializer.save(store=target_store, category_type=cat_type)
 
     def perform_destroy(self, instance):
@@ -73,7 +73,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({"error": "Nomi kiritilmagan"}, status=status.HTTP_400_BAD_REQUEST)
 
         category = (request.data.get("category") or "").strip()
-        category_type = request.data.get("category_type") or getattr(target_store, "category_type", "e_commerce")
+        category_type = request.data.get("category_type") or getattr(target_store, "category_type", "education")
         price = request.data.get("price")
         stock = request.data.get("stock")
 

@@ -186,19 +186,19 @@ def send_telegram_voice(
 
 
 
-def send_telegram_order_notification(
+def send_telegram_lead_notification(
     bot_token: str,
     owner_chat_id: str,
-    order,
+    lead,
 ) -> bool:
     """
-    Do'kon egasiga yangi buyurtma haqida chiroyli xabar yuboradi.
+    Do'kon egasiga yangi lid haqida chiroyli xabar yuboradi.
     """
     if not owner_chat_id:
         logger.warning("Egaga xabarnoma: tg_owner_chat_id yo'q!")
         return False
 
-    text = _format_order_notification(order)
+    text = _format_lead_notification(lead)
     return send_telegram_message(
         bot_token=bot_token,
         chat_id=owner_chat_id,
@@ -207,55 +207,41 @@ def send_telegram_order_notification(
     )
 
 
-def _format_order_notification(order) -> str:
-    """Buyurtma xabarnoma matnini formatlaydi"""
+def _format_lead_notification(lead) -> str:
+    """Lid xabarnoma matnini formatlaydi"""
     from django.utils import timezone
 
-    items_text = ""
-    if order.items:
-        for item in order.items:
-            name = item.get("name", "Noma'lum")
-            qty = item.get("qty", 1)
-            price = item.get("price", 0)
-            items_text += f"  • {name} × {qty}"
-            if price:
-                items_text += f" — {price:,} so'm"
-            items_text += "\n"
-    else:
-        items_text = "  • (ma'lumot yo'q)\n"
+    status_labels = {
+        "warm": "🔥 Iliq",
+        "cold": "❄️ Sovuq",
+        "unqualified": "❓ Aniqlanmagan",
+    }
+    status_text = status_labels.get(lead.lead_status, lead.lead_status)
 
-    total_text = ""
-    if order.total_amount:
-        total_text = f"\n💰 <b>Jami:</b> {order.total_amount:,} so'm"
-
-    # ⚠️ BUG FIX: avval "📍 Manzil:" qatori har doim, hatto bo'sh bo'lsa
-    # ham chiqib turardi. Ta'lim/Xizmat toifasidagi buyurtmalarda (AI
-    # manzil so'ramaydi, chunki kurs/xizmat uchun bu tushuncha yo'q)
-    # bu qator har doim bo'sh ko'rinib, tushunarsiz edi. Endi faqat
-    # haqiqiy manzil bo'lsa ko'rsatiladi.
-    address_text = f"📍 <b>Manzil:</b> {order.delivery_address}\n" if order.delivery_address else ""
+    course_text = (
+        f"📚 <b>Qiziqqan:</b> {lead.interested_course.name}\n"
+        if lead.interested_course else ""
+    )
 
     # Mijozning Telegram @username'i (bo'lsa) — egasi mijozning shaxsiy
     # profiliga tezroq o'tishi uchun.
     username_text = ""
-    customer = getattr(order, "customer", None)
+    customer = getattr(lead, "customer", None)
     if customer and getattr(customer, "username", None):
         username_text = f"🔗 <b>Telegram:</b> @{customer.username}\n"
 
     return (
-        f"🛍 <b>YANGI BUYURTMA!</b>\n"
+        f"🆕 <b>YANGI LID!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📋 <b>Raqam:</b> {order.order_number}\n"
-        f"👤 <b>Mijoz:</b> {order.customer_full_name}\n"
+        f"📋 <b>Raqam:</b> {lead.lead_number}\n"
+        f"👤 <b>Ism:</b> {lead.customer_full_name}\n"
         f"{username_text}"
-        f"📞 <b>Tel:</b> {order.customer_phone}\n"
-        f"{address_text}"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🛒 <b>Mahsulotlar:</b>\n{items_text}"
-        f"{total_text}\n"
+        f"📞 <b>Tel:</b> {lead.customer_phone}\n"
+        f"{course_text}"
+        f"🌡 <b>Holat:</b> {status_text}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"⏰ {timezone.now().strftime('%d.%m.%Y %H:%M')}\n"
-        f"📲 Platforma: {order.platform.upper()}"
+        f"📲 Platforma: {lead.platform.upper()}"
     )
 
 

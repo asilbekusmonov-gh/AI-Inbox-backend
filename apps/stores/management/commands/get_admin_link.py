@@ -2,7 +2,7 @@
 Management Command — Do'kon egasi uchun UNIKAL Telegram Admin Havolasini generatsiya qilish.
 
 Ishlatish:
-python manage.py get_admin_link --store "Zulfiya Fashion"
+python manage.py get_admin_link --store "Najot Ta'lim"
 """
 from django.core.management.base import BaseCommand
 from apps.stores.models import Store
@@ -16,7 +16,7 @@ class Command(BaseCommand):
             "--store",
             type=str,
             required=True,
-            help="Do'kon nomi yoki ID'si (masalan: 'Zulfiya Fashion' yoki 'store-1')",
+            help="Do'kon nomi yoki ID'si (masalan: 'Najot Ta'lim' yoki 'store-1')",
         )
         parser.add_argument(
             "--bot_username",

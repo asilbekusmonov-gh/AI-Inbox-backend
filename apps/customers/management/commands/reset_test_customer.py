@@ -51,7 +51,7 @@ class Command(BaseCommand):
 
         from apps.customers.models import Customer, CustomerSession
         from apps.chat.models import ChatMessage
-        from apps.orders.models import Order
+        from apps.orders.models import Lead
 
         qs = Customer.objects.filter(store=store)
         if username:
@@ -65,16 +65,16 @@ class Command(BaseCommand):
             return
 
         msg_count = ChatMessage.all_objects.filter(store=store, customer=customer).count()
-        order_count = Order.objects.filter(store=store, customer=customer).count()
+        lead_count = Lead.objects.filter(store=store, customer=customer).count()
 
         ChatMessage.all_objects.filter(store=store, customer=customer).delete()
-        Order.objects.filter(store=store, customer=customer).delete()
+        Lead.objects.filter(store=store, customer=customer).delete()
         CustomerSession.objects.filter(platform_user_id=customer.platform_user_id).delete()
         customer_display = customer.full_name or customer.username or customer.platform_user_id
         customer.delete()
 
         self.stdout.write(self.style.SUCCESS(
             f"✅ '{customer_display}' butunlay o'chirildi: "
-            f"{msg_count} ta xabar, {order_count} ta buyurtma, sessiya tozalandi."
+            f"{msg_count} ta xabar, {lead_count} ta lid, sessiya tozalandi."
         ))
         self.stdout.write("Endi shu odam qaytadan /start bosishi bilan butunlay yangi mijoz sifatida ro'yxatga olinadi.")

@@ -17,7 +17,7 @@ class CustomerViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["full_name", "phone_number", "username", "platform_user_id"]
-    ordering_fields = ["last_message_at", "total_orders", "created_at"]
+    ordering_fields = ["last_message_at", "total_leads", "created_at"]
     ordering = ["-last_message_at"]
 
     def _get_target_store(self):

@@ -18,7 +18,7 @@ class CustomerSerializer(serializers.ModelSerializer):
             "full_name",
             "phone_number",
             "username",
-            "total_orders",
+            "total_leads",
             "last_message_at",
             "ai_active",
             "created_at",
