@@ -140,13 +140,16 @@ class Store(BaseModel):
         help_text="AI bot faolmi? False bo'lsa operator qo'lda javob beradi"
     )
     ai_system_prompt = models.TextField(
-        default=(
-            "Siz onlayn do'konning yordamchi botisiz. "
-            "Mijozlarga do'rtona va professional tarzda javob bering. "
-            "Buyurtma olishda mijozdan to'liq ism, telefon raqam va "
-            "yetkazib berish manzilini so'rang."
-        ),
-        help_text="AI uchun tizim prompti — do'kon egasi bu yerga o'z ko'rsatmalarini yozadi"
+        default="",
+        blank=True,
+        help_text=(
+            "AI uchun tizim prompti — do'kon egasi bu yerga o'z ko'rsatmalarini "
+            "yozadi. Yangi biznes uchun ATAYLAB bo'sh boshlanadi (avval bu yerda "
+            "e-commerce davridan qolgan 'onlayn do'kon ... yetkazib berish "
+            "manzili' degan default matn bor edi — bu Education/Services "
+            "pivotidan keyin ham hamon yangi har bir bizneste sukut bo'yicha "
+            "ishlab turgan, mos kelmaydigan qoldiq edi)."
+        )
     )
     ai_model = models.CharField(
         max_length=50,
