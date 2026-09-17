@@ -1,5 +1,5 @@
 """
-API v1 Router — Social-Commerce AI Inbox
+API v1 Router — Warmix
 
 Endpoints:
 - /api/v1/schema/ -> OpenAPI 3 Schema (JSON)

@@ -7,6 +7,9 @@ from .views import (
     StoreOnboardingView,
     InstagramConnectView,
     InstagramDisconnectView,
+    TelegramGroupDisconnectView,
+    StoreStaffMemberListCreateView,
+    StoreStaffMemberDeleteView,
     CatalogParseView,
 )
 
@@ -18,5 +21,8 @@ urlpatterns = [
     path("parse-catalog/", CatalogParseView.as_view(), name="store-parse-catalog"),
     path("instagram/connect/", InstagramConnectView.as_view(), name="instagram-connect"),
     path("instagram/disconnect/", InstagramDisconnectView.as_view(), name="instagram-disconnect"),
+    path("telegram/group/disconnect/", TelegramGroupDisconnectView.as_view(), name="telegram-group-disconnect"),
+    path("staff/", StoreStaffMemberListCreateView.as_view(), name="staff-list-create"),
+    path("staff/<uuid:pk>/", StoreStaffMemberDeleteView.as_view(), name="staff-delete"),
 ]
 

@@ -35,7 +35,7 @@ class Command(BaseCommand):
                 success = send_telegram_message(
                     bot_token=bot_token,
                     chat_id=chat_id,
-                    text=f"Assalomu alaykum {user_name}! 🤖 AI Inbox testi muvaffaqiyatli!",
+                    text=f"Assalomu alaykum {user_name}! 🤖 Warmix testi muvaffaqiyatli!",
                 )
 
                 if success:

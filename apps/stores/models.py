@@ -217,3 +217,45 @@ class Store(BaseModel):
     def has_telegram_group(self) -> bool:
         """Telegram guruh bog'langan"""
         return bool(self.tg_group_chat_id)
+
+
+class StoreStaffMember(BaseModel):
+    """
+    Do'kon egasi Telegram guruhida ishlaydigan xodimlar (masalan sotuv
+    menejerlari) ro'yxati.
+
+    ⚠️ Bu TO'LIQ jamoa/rol tizimi (TWA'ga kirish, ruxsatlar va h.k.) EMAS —
+    faqat bitta aniq maqsad uchun: guruhda ishlaydigan xodimlarni AI'dan
+    ajratish, shunda bot ularga ham (do'kon egasiga o'xshab) mijoz kabi
+    sotuv taklifi/ma'lumot berishga urinmaydi. To'liq StoreMember/rol
+    tizimi hali qurilmagan — real ehtiyoj chiqqanda alohida ishlanadi.
+    """
+    store = models.ForeignKey(
+        Store,
+        on_delete=models.CASCADE,
+        related_name="staff_members",
+        help_text="Qaysi do'konning xodimi"
+    )
+    tg_username = models.CharField(
+        max_length=64,
+        help_text="Xodimning Telegram @username'i (@ belgisisiz, kichik harflarda saqlanadi)"
+    )
+    full_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Xodimning ismi (ixtiyoriy, faqat ro'yxatda ko'rsatish uchun)"
+    )
+
+    class Meta:
+        verbose_name = "Do'kon Xodimi"
+        verbose_name_plural = "Do'kon Xodimlari"
+        ordering = ["-created_at"]
+        unique_together = [("store", "tg_username")]
+
+    def __str__(self):
+        return f"@{self.tg_username} ({self.store.name})"
+
+    def save(self, *args, **kwargs):
+        self.tg_username = self.tg_username.lstrip("@").strip().lower()
+        super().save(*args, **kwargs)

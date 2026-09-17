@@ -383,6 +383,37 @@ def disconnect_instagram_from_store(store) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
+# Telegram Guruhini Store'dan Uzish
+# ─────────────────────────────────────────────────────────────
+
+def disconnect_telegram_group_from_store(store) -> dict:
+    """
+    Do'kondan bog'langan Telegram guruhini uzadi (bog'lanishni bekor
+    qiladi — bot guruhning o'zidan chiqarilmaydi, faqat endi u guruhdagi
+    xabarlarga AI sifatida javob bermay qo'yadi).
+
+    ⚠️ Egasi botni tasodifan/adashib NOTO'G'RI guruhga qo'shib yuborishi
+    mumkin — bunday holatda avval yagona chora bot'ni Telegram'ning o'zida
+    guruhdan qo'lda olib tashlash edi. Endi TWA Sozlamalar sahifasida
+    to'g'ridan-to'g'ri "Uzib qo'yish" tugmasi bilan ham bajarish mumkin —
+    foydalanuvchi buni aniq so'radi.
+
+    Args:
+        store: Store obyekti
+
+    Returns:
+        {"success": True}
+    """
+    store.tg_group_chat_id = None
+    store.save(update_fields=["tg_group_chat_id", "updated_at"])
+
+    logger.info(
+        f"[Telegram Guruh Disconnect] Uzildi: store={store.name}"
+    )
+    return {"success": True}
+
+
+# ─────────────────────────────────────────────────────────────
 # TASK 1E — Token Yangilash (Refresh)
 # ─────────────────────────────────────────────────────────────
 

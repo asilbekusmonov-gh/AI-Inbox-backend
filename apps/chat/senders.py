@@ -32,10 +32,18 @@ def send_telegram_message(
     text: str,
     parse_mode: Optional[str] = "HTML",
     reply_markup: Optional[dict] = None,
+    reply_to_message_id: Optional[str] = None,
 ) -> bool:
     """
     Telegram bot orqali xabar yuboradi.
     Uzoq xabarlarni bo'lib yuboradi.
+
+    ⚠️ `reply_to_message_id` — guruhlarda MUHIM: bir nechta odam yozib
+    turgan guruhda bot javobni oddiy (thread'siz) xabar sifatida yuborsa,
+    kim SO'RAGANI va kimga JAVOB berilayotgani chalkashib qolardi
+    (foydalanuvchi to'g'ridan-to'g'ri shu muammoni ta'kidladi). Shu
+    parametr berilsa, javob Telegram'ning "reply" (iqtibos) funksiyasi
+    orqali aynan o'sha xabarga bog'lab yuboriladi.
     """
     if not bot_token or not chat_id or not text:
         logger.warning(
@@ -52,12 +60,17 @@ def send_telegram_message(
     for i, chunk in enumerate(chunks):
         # Reply markup tugmalarini oxirgi bo'lakka biriktiramiz
         current_markup = reply_markup if i == len(chunks) - 1 else None
+        # Faqat BIRINCHI bo'lak asl xabarga "reply" qilinadi — keyingi
+        # bo'laklar shu birinchisining davomi, ularni ham alohida-alohida
+        # asl xabarga bog'lash ortiqcha va chalkash bo'lardi.
+        current_reply_to = reply_to_message_id if i == 0 else None
         success = _send_telegram_chunk(
             bot_token=bot_token,
             chat_id=chat_id,
             text=chunk,
             parse_mode=parse_mode,
             reply_markup=current_markup,
+            reply_to_message_id=current_reply_to,
         )
         if not success:
             all_success = False
@@ -74,6 +87,7 @@ def _send_telegram_chunk(
     text: str,
     parse_mode: str,
     reply_markup: dict = None,
+    reply_to_message_id: Optional[str] = None,
     max_retries: int = 3,
 ) -> bool:
     """Bitta Telegram xabar bo'lagini yuboradi (retry bilan)"""
@@ -86,6 +100,12 @@ def _send_telegram_chunk(
         payload["parse_mode"] = parse_mode
     if reply_markup:
         payload["reply_markup"] = reply_markup
+    if reply_to_message_id:
+        payload["reply_to_message_id"] = reply_to_message_id
+        # Asl xabar biror sabab bilan o'chirilgan/topilmasa ham, javob
+        # baribir (oddiy xabar sifatida) yuborilishi uchun — aks holda
+        # Telegram butun so'rovni rad etib, mijoz umuman javob olmay qolardi.
+        payload["allow_sending_without_reply"] = True
 
     for attempt in range(1, max_retries + 1):
         try:
@@ -261,6 +281,7 @@ def send_reply(
     chat_id: str,
     text: str,
     customer=None,
+    reply_to_message_id: Optional[str] = None,
 ) -> bool:
     """
     Platforma turini avtomatik aniqlaydi va javob yuboradi.
@@ -271,6 +292,10 @@ def send_reply(
         chat_id: Javob yuboriladigan chat/user ID
         text: Yuborilinadigan matn
         customer: Customer obyekti (ixtiyoriy — Instagram 24h window uchun)
+        reply_to_message_id: Telegram guruhlarida javobni aynan qaysi
+            xabarga "reply" qilib bog'lash kerakligi (shaxsiy chatda kerak
+            emas — faqat guruhda bir nechta kishi yozganda kim kimga
+            javob berilayotganini aniq qilish uchun ishlatiladi).
 
     Returns:
         True — yuborildi
@@ -291,6 +316,7 @@ def send_reply(
                 bot_token=store.tg_bot_token,
                 chat_id=chat_id,
                 text=text,
+                reply_to_message_id=reply_to_message_id,
             )
 
         elif platform == "instagram":

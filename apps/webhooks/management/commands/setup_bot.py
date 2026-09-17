@@ -67,6 +67,17 @@ class Command(BaseCommand):
                 store.save()
                 self.stdout.write(self.style.SUCCESS(f"🏬 Do'kon biriktirildi: {store.name}"))
 
+                # ⚠️ BUG FIX: bu yerda avval botning ko'rinadigan ismi
+                # (DISPLAY NAME) har safar setup_bot ishga tushganda
+                # majburan "Warmix"ga qaytarib qo'yilardi — bu esa do'kon
+                # egasi BotFather orqali o'z biznesi uchun boshqa nom
+                # qo'ygan bo'lsa (masalan "LeadNode"), webhook tuzatish
+                # uchun setup_bot qayta ishga tushirilganda o'sha maxsus
+                # nomni jimgina o'chirib yuborardi. Bot ismi endi bu
+                # skriptga umuman tegishli emas — egasi buni BotFather
+                # orqali o'zi xohlagancha o'zgartira oladi va bu doimiy
+                # qoladi.
+
                 # 2. Bot Tavsifi
                 # ⚠️ Bu — bir nechta do'konga xizmat qiladigan BITTA umumiy
                 # bot (README'dagi "Single shared bot, many tenants"), shuning
@@ -75,9 +86,13 @@ class Command(BaseCommand):
                 # ham noto'g'ri (masalan "Pdp academy rasmiy...") matnni
                 # ko'radi. Avval shu xato bor edi, jonli tekshirishda
                 # aniqlandi va tuzatildi.
+                # ⚠️ Bundan tashqari, avval bu yerda "buyurtmalarni tezkor
+                # qabul qiladi" (e-commerce/order olish) degan matn bor edi —
+                # loyiha endi faqat education/services, "buyurtma" emas
+                # "lid" tushunchasi ishlatiladi.
                 description = (
-                    "🤖 AI-Inbox — do'koningiz uchun sun'iy intellektli sotuvchi yordamchi.\n\n"
-                    "✨ 24/7 mijozlarga javob beradi va buyurtmalarni tezkor qabul qiladi!\n\n"
+                    "🤖 Warmix — do'koningiz uchun sun'iy intellektli yordamchi.\n\n"
+                    "✨ 24/7 mijozlarga javob beradi va qiziqqan mijozlarni tezkor saralab beradi!\n\n"
                     "Boshlash uchun sizga yuborilgan shaxsiy havola orqali kiring 👇"
                 )
                 short_desc = "24/7 ishlaydigon AI yordamchi"

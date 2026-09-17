@@ -184,6 +184,11 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 60 * 60 * 24,  # Har 24 soatda bir marta
         "options": {"queue": "maintenance"},
     },
+    "retry-failed-bitrix-exports": {
+        "task": "apps.orders.tasks.retry_failed_bitrix_exports",
+        "schedule": 60 * 30,  # Har 30 daqiqada bir marta
+        "options": {"queue": "maintenance"},
+    },
 }
 
 

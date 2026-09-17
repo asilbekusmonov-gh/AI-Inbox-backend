@@ -41,8 +41,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--bot_username",
             type=str,
-            default="Ai_InboxBot",
-            help="Telegram Bot username (standart: Ai_InboxBot)",
+            default="WarmixAi_bot",
+            help="Telegram Bot username (standart: WarmixAi_bot)",
         )
 
     def handle(self, *args, **options):

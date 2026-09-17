@@ -57,6 +57,32 @@ class ChatMessage(BaseModel):
         max_length=255,
         help_text="Platformadagi original xabar ID (idempotency kafolati)"
     )
+    bot_token = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text=(
+            "Xabar qaysi bot tokeni orqali kelgan (idempotency kafolati). "
+            "Bot almashtirilganda (masalan Ai_InboxBot → WarmixAi_bot) "
+            "Telegram har bir bot uchun message_id'ni 1'dan qaytadan "
+            "boshlaydi — shu bayroqsiz eski botdagi kichik ID'lar yangi "
+            "botdagi xabarlarga xato ravishda 'dublikat' deb urib qolardi."
+        )
+    )
+    chat_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text=(
+            "Xabar qaysi Telegram chat/guruhdan kelgan (idempotency "
+            "kafolati). Telegram'da message_id faqat (bot, chat) juftligi "
+            "ichida unikal — masalan guruh o'chirilib qayta yaratilganda "
+            "yangi guruhning xabar-ID hisoblagichi yana 1'dan boshlanadi, "
+            "shu bayroqsiz eski (o'chirilgan) guruhdagi kichik ID'lar "
+            "yangi guruhdagi xabarlarga xato ravishda 'dublikat' deb "
+            "urib, javobsiz qoldirardi (jonli testda aniqlandi)."
+        )
+    )
     platform = models.CharField(
         max_length=20,
         choices=Platform.choices,
@@ -146,8 +172,14 @@ class ChatMessage(BaseModel):
         verbose_name = "Chat xabari"
         verbose_name_plural = "Chat xabarlari"
         ordering = ["created_at"]
-        # Idempotency kafolati: bir xil xabar ikki marta saqlanmaydi
-        unique_together = [("store", "message_id", "platform")]
+        # Idempotency kafolati: bir xil xabar ikki marta saqlanmaydi.
+        # ⚠️ `customer` shart — Telegram/Instagram'da message_id faqat BITTA
+        # suhbat ichida unikal, turli mijozlarning suhbatlarida bir xil
+        # kichik raqamlar (1, 2, 3...) tabiiy qaytarilaveradi. Faqat
+        # (store, message_id, platform) bo'yicha tekshirish boshqa mijozning
+        # xabarini yolg'on dublikat deb hisoblab, javobsiz qoldirar edi.
+        # `bot_token` va `chat_id` ham shart — sabab yuqoridagi maydon izohlarida.
+        unique_together = [("store", "customer", "message_id", "platform", "bot_token", "chat_id")]
         indexes = [
             models.Index(fields=["store", "customer"], name="msg_store_customer_idx"),
             models.Index(fields=["store", "created_at"], name="msg_store_created_idx"),
@@ -164,10 +196,27 @@ class ChatMessage(BaseModel):
         )
 
     @classmethod
-    def is_duplicate(cls, store_id, message_id: str, platform: str) -> bool:
+    def is_duplicate(cls, store_id, message_id: str, platform: str, sender_id: str, bot_token: str = "", chat_id: str = "") -> bool:
         """
         Idempotency tekshiruvi.
-        Bu message_id ushbu platformada allaqachon mavjudmi?
+        Bu message_id ushbu (do'kon, mijoz, platforma, bot, chat) uchun allaqachon mavjudmi?
+
+        ⚠️ `sender_id` (customer__platform_user_id) shart — message_id faqat
+        bitta suhbat ichida unikal, shuning uchun turli mijozlarni ajratish
+        kerak (yuqoridagi Meta.unique_together izohiga qarang).
+
+        ⚠️ `bot_token` ham shart (Telegram uchun) — bot almashtirilganda
+        Telegram message_id'ni yangi botning suhbati uchun 1'dan qaytadan
+        boshlaydi, shuning uchun tokenlarni ajratmasak eski botdagi past
+        raqamli xabarlar yangi botdagi haqiqiy yangi xabarlarga urilib,
+        ularni xato "dublikat" deb bloklab qo'yishi mumkin edi.
+
+        ⚠️ `chat_id` ham shart — xuddi shu sababga o'xshab, Telegram
+        guruh o'chirilib qayta yaratilganda ham (yoki mijoz turli
+        guruhlarda yozganda) message_id qaytadan 1'dan boshlanadi. Bu
+        holat jonli testda aynan shu tarzda aniqlandi: eski (o'chirilgan)
+        guruhdagi past raqamli xabar yangi guruhdagi haqiqiy yangi
+        xabarga urilib, uni xato "dublikat" deb bloklab qo'ygan edi.
 
         Returns:
             True — dublikat (skip kerak)
@@ -177,6 +226,9 @@ class ChatMessage(BaseModel):
             store_id=store_id,
             message_id=message_id,
             platform=platform,
+            customer__platform_user_id=sender_id,
+            bot_token=bot_token,
+            chat_id=chat_id,
         ).exists()
 
 

@@ -9,7 +9,7 @@ Frontend ↔ Backend field mapping:
   - description         ← description (new field)
 """
 from rest_framework import serializers
-from .models import Store
+from .models import Store, StoreStaffMember
 
 
 class StoreSerializer(serializers.ModelSerializer):
@@ -219,4 +219,21 @@ class StoreOnboardingSerializer(serializers.ModelSerializer):
                     )
 
         return instance
+
+
+class StoreStaffMemberSerializer(serializers.ModelSerializer):
+    """
+    Guruhda ishlaydigan xodim (masalan sotuv menejeri) — AI bunday
+    odamlarga do'kon egasiga o'xshab sotuv taklifi qilmaydi.
+    """
+    class Meta:
+        model = StoreStaffMember
+        fields = ["id", "tg_username", "full_name", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+    def validate_tg_username(self, value: str) -> str:
+        cleaned = value.lstrip("@").strip()
+        if not cleaned:
+            raise serializers.ValidationError("Telegram username kiritilishi shart.")
+        return cleaned
 

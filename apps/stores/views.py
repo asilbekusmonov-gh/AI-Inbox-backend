@@ -11,8 +11,10 @@ from .serializers import (
     StoreConfigUpdateSerializer,
     StoreOnboardingSerializer,
     OnboardingItemSerializer,
+    StoreStaffMemberSerializer,
     validate_item_metadata,
 )
+from .models import StoreStaffMember
 from apps.core.authentication import get_store_from_request
 
 logger = logging.getLogger("apps.stores")
@@ -302,3 +304,76 @@ class InstagramDisconnectView(APIView):
 
         result = disconnect_instagram_from_store(store)
         return Response(result, status=status.HTTP_200_OK)
+
+
+class TelegramGroupDisconnectView(APIView):
+    """
+    Do'kondan bog'langan Telegram guruhini uzish (egasi tasodifan
+    noto'g'ri guruh qo'shib yuborgan bo'lsa, TWA'dan to'g'ridan-to'g'ri
+    tuzatishi uchun).
+
+    DELETE /api/v1/store/telegram/group/disconnect/
+
+    Response:
+        {"success": true}
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_store(self):
+        return get_store_from_request(self.request)
+
+    def delete(self, request):
+        store = self._get_store()
+        if not store:
+            return Response(
+                {"error": "Do'kon topilmadi"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        from apps.stores.services import disconnect_telegram_group_from_store
+
+        result = disconnect_telegram_group_from_store(store)
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class StoreStaffMemberListCreateView(generics.ListCreateAPIView):
+    """
+    Do'kon egasi guruhda ishlaydigan xodimlarini (sotuv menejerlari)
+    ro'yxatga oladi — bot ularga ham (egasiga o'xshab) mijoz kabi sotuv
+    taklifi qilmasligi uchun.
+
+    GET  /api/v1/store/staff/  -> ro'yxat
+    POST /api/v1/store/staff/  -> yangi xodim qo'shish ({"tg_username": "...", "full_name": "..."})
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = StoreStaffMemberSerializer
+
+    def get_queryset(self):
+        store = get_store_from_request(self.request)
+        if not store:
+            return StoreStaffMember.objects.none()
+        return StoreStaffMember.objects.filter(store=store)
+
+    def perform_create(self, serializer):
+        store = get_store_from_request(self.request)
+        if not store:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Do'kon topilmadi. Telegram yoki JWT orqali kiring.")
+        serializer.save(store=store)
+
+
+class StoreStaffMemberDeleteView(generics.DestroyAPIView):
+    """
+    DELETE /api/v1/store/staff/<id>/  -> xodimni ro'yxatdan o'chirish
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = StoreStaffMemberSerializer
+
+    def get_queryset(self):
+        store = get_store_from_request(self.request)
+        if not store:
+            return StoreStaffMember.objects.none()
+        return StoreStaffMember.objects.filter(store=store)
+
+    def perform_destroy(self, instance):
+        instance.soft_delete()

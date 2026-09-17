@@ -19,12 +19,40 @@ import logging
 from celery import shared_task
 from celery.exceptions import MaxRetriesExceededError, SoftTimeLimitExceeded
 from django.conf import settings
+from django.core.cache import cache
 from django.db import IntegrityError
 
 logger = logging.getLogger("apps.webhooks")
 
 
-def _send_command_reply(store, customer, platform, chat_id, text, parse_mode="HTML", reply_markup=None, is_group_message=False):
+def _is_message_addressed_to_bot(raw_payload: dict, store) -> bool:
+    """
+    Guruh xabari botga aniq qaratilganmi (@mention yoki uning xabariga
+    reply)? Faqat shu holatda botning o'zi "javob berish kerak" deb
+    hisoblanadi — oddiy guruh suhbatiga (bot haqida bo'lmagan) aralashib
+    ketmasligi uchun.
+    """
+    if not raw_payload or not isinstance(raw_payload, dict):
+        return False
+    inner = raw_payload.get("message", {}) or {}
+
+    bot_username = (getattr(store, "tg_bot_username", "") or "").lstrip("@").lower()
+    original_text = (inner.get("text") or "").strip()
+    if bot_username and original_text.lower().startswith(f"@{bot_username}"):
+        return True
+
+    # Bot tokenining "<raqamli_id>:<hash>" formatidagi birinchi qismi —
+    # botning o'z Telegram foydalanuvchi ID'si (alohida saqlash shart emas).
+    bot_token = getattr(store, "tg_bot_token", "") or ""
+    bot_id = bot_token.split(":")[0] if ":" in bot_token else ""
+    reply_to = inner.get("reply_to_message")
+    if bot_id and reply_to and str(reply_to.get("from", {}).get("id", "")) == bot_id:
+        return True
+
+    return False
+
+
+def _send_command_reply(store, customer, platform, chat_id, text, parse_mode="HTML", reply_markup=None, is_group_message=False, reply_to_message_id=None):
     """
     Buyruq (/start, /dashboard, /help) javobini yuboradi VA uni
     ChatMessage sifatida (role=ASSISTANT) saqlaydi.
@@ -49,12 +77,15 @@ def _send_command_reply(store, customer, platform, chat_id, text, parse_mode="HT
         text=text,
         parse_mode=parse_mode,
         reply_markup=reply_markup,
+        reply_to_message_id=reply_to_message_id,
     )
     if sent and customer is not None:
         ChatMessage.objects.create(
             store=store,
             customer=customer,
             message_id=f"cmd_reply_{uuid.uuid4().hex[:10]}",
+            bot_token=store.tg_bot_token,
+            chat_id=str(chat_id),
             platform=platform,
             role=ChatMessage.Role.ASSISTANT,
             content=text,
@@ -146,12 +177,18 @@ def process_incoming_message(
             customer.save(update_fields=["full_name", "updated_at"])
 
         # ── 3. Xabarni DB'ga saqlash (idempotency) ────────────────────
+        # ⚠️ `customer` lookup'ning bir qismi bo'lishi SHART — message_id
+        # faqat bitta suhbat ichida unikal, `customer`siz qidiruv boshqa
+        # mijozning (bir xil store+platform'dagi) xabarini xato ushlab
+        # olib, dublikat deb hisoblab qo'yardi (ChatMessage.Meta'ga qarang).
         chat_message, msg_created = ChatMessage.all_objects.get_or_create(
             store=store,
+            customer=customer,
             message_id=message_id,
             platform=platform,
+            bot_token=store.tg_bot_token,
+            chat_id=str(chat_id),
             defaults={
-                "customer": customer,
                 "role": ChatMessage.Role.USER,
                 "content": text,
                 "raw_payload": raw_payload,
@@ -260,7 +297,7 @@ def process_incoming_message(
             if is_admin:
                 logger.info("[Task] Admin /start keldi -> Dashboard TWA tugmasi yuborilmoqda")
                 welcome_text = (
-                    f"<b>Assalomu alaykum, Xurmatli {store.name} Do'kon Egasi! 👑</b>\n\n"
+                    f"<b>Assalomu alaykum, Xurmatli {store.name} Admini! 👑</b>\n\n"
                     f"Boshqaruv paneli orqali kelgan buyurtmalarni ko'rish, katalogingizni boshqarish hamda "
                     f"AI bot yo'riqnomalarini sozlash uchun pastdagi tugmani bosing 👇"
                 )
@@ -294,6 +331,7 @@ def process_incoming_message(
                     text=welcome_text,
                     reply_markup=reply_markup,
                     is_group_message=is_group,
+                    reply_to_message_id=message_id if is_group else None,
                 )
 
                 # Chat menu tugmasini ham shu Do'kon Egasi uchun "Dashboard"
@@ -343,6 +381,7 @@ def process_incoming_message(
                     store, customer, platform, chat_id,
                     text=customer_text,
                     is_group_message=is_group,
+                    reply_to_message_id=message_id if is_group else None,
                 )
 
             ChatMessage.objects.filter(id=chat_message.id).update(
@@ -362,6 +401,7 @@ def process_incoming_message(
                 store, customer, platform, chat_id,
                 text=help_text,
                 is_group_message=is_group,
+                reply_to_message_id=message_id if is_group else None,
             )
             ChatMessage.objects.filter(id=chat_message.id).update(
                 processing_status=ChatMessage.ProcessingStatus.COMPLETED
@@ -400,11 +440,70 @@ def process_incoming_message(
                 store, customer, platform, chat_id,
                 text=voice_reply_text,
                 is_group_message=is_group,
+                reply_to_message_id=message_id if is_group else None,
             )
             ChatMessage.objects.filter(id=chat_message.id).update(
                 processing_status=ChatMessage.ProcessingStatus.COMPLETED
             )
             return
+
+        # ── 4.56. Guruhda do'kon egasi YOKI ro'yxatdagi xodimi (sotuv
+        # menejeri) o'zi yozganda — AI sotuv javobi bermasin ────────────
+        # ⚠️ `is_admin` guruhda ATAYLAB yoqilmagan (yuqoridagi izohga
+        # qarang — ichki boshqaruv havolasi guruhda ochiq ko'rinib
+        # qolmasligi uchun). Lekin bu degani egasi (yoki uning xodimi)
+        # guruhda oddiy mijoz sifatida to'liq AI sotuv taklifini olishi
+        # kerak degani emas — foydalanuvchi buni to'g'ridan-to'g'ri
+        # ta'kidladi ("nega men guruhda owner'man lekin bot menga malumot
+        # beryabdi", "gurpada 3-4 ta sotuv menejeri bolsa ularga ham
+        # sotishga urinadimi?"). Xodimlar ro'yxati — StoreStaffMember
+        # (apps/stores/models.py); bu TO'LIQ rol/TWA-ruxsat tizimi emas,
+        # faqat AI'dan ajratish uchun.
+        #
+        # ⚠️ Qisqa "tanidim" tasdiqi ham FAQAT botga aniq murojaat
+        # qilganda (@mention yoki reply) yuboriladi — aks holda egasi/
+        # xodim guruhda mijozlar bilan oddiy gaplashganda bot har safar
+        # aralashib, suhbatni bezovta qilardi.
+        is_recognized_owner = bool(store.tg_owner_chat_id) and str(store.tg_owner_chat_id) == str(sender_id)
+        is_staff = False
+        if is_group and not is_recognized_owner and sender_username:
+            from apps.stores.models import StoreStaffMember
+            is_staff = StoreStaffMember.objects.filter(
+                store=store, tg_username__iexact=sender_username
+            ).exists()
+
+        if is_group and (is_recognized_owner or is_staff):
+            addressed_to_bot = _is_message_addressed_to_bot(raw_payload, store)
+            who = "do'kon egasi" if is_recognized_owner else "xodim"
+            logger.info(
+                f"[Task] Guruhda {who}ning o'zi yozdi — AI sotuv "
+                f"javobi berilmadi | store={store.name} | botga qaratilganmi={addressed_to_bot}"
+            )
+            if addressed_to_bot:
+                ack_text = (
+                    "👋 Sizni do'kon egasi sifatida taniyman, shuning uchun savdo taklifi qilmayman — bu yerda faqat mijozlaringiz yozganda AI ishga tushadi."
+                    if is_recognized_owner else
+                    "👋 Sizni jamoa xodimi sifatida taniyman, shuning uchun savdo taklifi qilmayman — bu yerda faqat mijozlar yozganda AI ishga tushadi."
+                )
+                _send_command_reply(
+                    store, customer, platform, chat_id,
+                    text=ack_text,
+                    is_group_message=is_group,
+                    reply_to_message_id=message_id,
+                )
+            ChatMessage.objects.filter(id=chat_message.id).update(
+                processing_status=ChatMessage.ProcessingStatus.COMPLETED
+            )
+            return
+
+        # ⚠️ Qasddan MENTION/REPLY talab qilinmaydi — mijoz botni
+        # belgilashni unutsa ham, haqiqiy savoliga javob olishi kerak
+        # (foydalanuvchi buni ANIQ tanladi: qulaylik xavfsizlikdan
+        # ustun). Kimga qaratilganini AI o'zi (system prompt'dagi (a)
+        # qoidasi orqali) hal qiladi. O'rniga, pastda AI javobini
+        # YUBORISHDAN OLDIN — inson (ega/xodim) ALLAQACHON shu mijozga
+        # javob berib ulgurgan bo'lsa, tekshirib, AI javobini bekor
+        # qilamiz (pastdagi 5.6-band, "insonning tuzatishiga hurmat" tekshiruvi).
 
         # ── 4.6. Operator Handoff Trigger (Mijoz Insoniy Operator So'raganda) ─
         HANDOFF_KEYWORDS = ["operator", "odam bilan", "insonga", "call center", "menejer", "human"]
@@ -488,6 +587,65 @@ def process_incoming_message(
             f"has_lead={ai_response.has_lead}"
         )
 
+        # ── 5.2. AI umuman javob berolmagan holat (masalan Gemini kvotasi
+        # tugagan) — mijozga "texnik muammo" xabarini HECH KIMGA (ayniqsa
+        # guruhda — bir nechta odam ko'radi) yubormaymiz. Buning o'rniga
+        # xabarni "FAILED" deb belgilab (TWA Inbox'da ko'rinib, qo'lda
+        # javob berish mumkin bo'lishi uchun), do'kon egasiga BIR MARTA
+        # (soatiga bir marta cooldown bilan — takror-takror bezovta
+        # qilmaslik uchun) ogohlantirish yuboramiz.
+        # ⚠️ GEMINI_API_KEY barcha do'konlar uchun UMUMIY (Single Master
+        # Bot bilan bir xil model) — demak bitta do'kon uchun kvota
+        # tugashi ODATDA hammasiga birdan ta'sir qiladi.
+        if ai_response.is_error:
+            logger.warning(
+                f"[Task] AI xato holatida — mijozga javob yuborilmadi | "
+                f"store={store.name} | error_type={ai_response.error_type}"
+            )
+            error_reason = ai_response.error_type or "nomalum xato"
+            ChatMessage.objects.filter(id=chat_message.id).update(
+                processing_status=ChatMessage.ProcessingStatus.FAILED,
+                error_message=f"AI javob berolmadi ({error_reason})",
+            )
+            if store.tg_owner_chat_id and store.tg_bot_token:
+                cooldown_key = f"ai_error_alert_sent:{store.id}:{ai_response.error_type}"
+                if cache.add(cooldown_key, True, timeout=60 * 60):
+                    from apps.chat.senders import send_telegram_message as _send_owner_alert
+                    if ai_response.error_type == "quota":
+                        owner_text = (
+                            "🚨 <b>AI TO'XTAB QOLDI — kunlik so'rov limiti tugadi!</b>\n\n"
+                            "Gemini AI'ning bepul kunlik limiti tugagani sabab, bot hozir "
+                            "mijozlarga AVTOMATIK javob berolmayapti. Mijozlarning xabarlari "
+                            "TWA Inbox'da saqlanmoqda — hozircha qo'lda javob bering.\n\n"
+                            "Doimiy hal qilish uchun: Google AI Studio'da pulli rejaga o'ting."
+                        )
+                    else:
+                        owner_text = (
+                            "🚨 <b>AI vaqtincha javob berolmayapti (texnik xato)!</b>\n\n"
+                            "Mijozlarning xabarlari TWA Inbox'da saqlanmoqda — hozircha "
+                            "qo'lda javob bering. Muammo davom etsa, birozdan so'ng qayta tekshiring."
+                        )
+                    _send_owner_alert(
+                        bot_token=store.tg_bot_token,
+                        chat_id=store.tg_owner_chat_id,
+                        text=owner_text,
+                        parse_mode="HTML",
+                    )
+            return
+
+        # ── 5.3. Guruhda AI ataylab "javob yozish shart emas" deb tanladi
+        # (mijoz shunchaki reaksiya/izoh yozgan, haqiqiy savol emas) —
+        # hech narsa yubormasdan, xabarni COMPLETED deb belgilab chiqamiz.
+        if ai_response.is_silent:
+            logger.info(
+                f"[Task] AI reaksiyaga javob yozmaslikni tanladi (NO_REPLY) | "
+                f"store={store.name} | msg_id={message_id}"
+            )
+            ChatMessage.objects.filter(id=chat_message.id).update(
+                processing_status=ChatMessage.ProcessingStatus.COMPLETED
+            )
+            return
+
         # ── 5.5. AI javobini DB'ga saqlash ─────────────────────────────
         #
         # ⚠️ BUG FIX (poyga holati / race condition): avval bu yerda oddiy
@@ -506,10 +664,12 @@ def process_incoming_message(
         # to'xtaydi.
         ai_message, ai_message_created = ChatMessage.objects.get_or_create(
             store=store,
+            customer=customer,
             message_id=f"ai_resp_{message_id}",
             platform=platform,
+            bot_token=store.tg_bot_token,
+            chat_id=str(chat_id),
             defaults={
-                "customer": customer,
                 "role": ChatMessage.Role.ASSISTANT,
                 "content": ai_response.text,
                 "processing_status": ChatMessage.ProcessingStatus.COMPLETED,
@@ -534,13 +694,53 @@ def process_incoming_message(
             )
             return
 
+        # ── 5.6. Guruhda: AI javob tayyorlanayotgan bir necha soniya
+        # ichida inson (do'kon egasi/xodim) ALLAQACHON shu mijozga qo'lda
+        # javob yozib ulgurgan bo'lsa — AI javobini ENDI yubormaymiz.
+        # ⚠️ Mention/reply talabini olib tashlaganimiz uchun (mijoz
+        # botni belgilamasa ham javob olishi uchun), bot admin bilan
+        # "ustma-ust tushib qolish" xavfi qaytadi — buni shu tekshiruv
+        # bilan qoplaymiz: ega/xodim mijozning xabaridan KEYIN o'sha
+        # guruhga (istalgan) xabar yozgan bo'lsa, demak allaqachon
+        # o'zi javob berayapti — bot ikkinchi, ehtimol qarama-qarshi
+        # javob bilan aralashmasin.
+        if is_group:
+            human_ids = set()
+            if store.tg_owner_chat_id:
+                human_ids.add(str(store.tg_owner_chat_id))
+            from apps.stores.models import StoreStaffMember as _StoreStaffMember
+            from apps.customers.models import Customer as _Customer
+            staff_usernames = list(
+                _StoreStaffMember.objects.filter(store=store).values_list("tg_username", flat=True)
+            )
+            if staff_usernames:
+                human_ids.update(
+                    str(pid) for pid in _Customer.objects.filter(
+                        store=store, username__in=staff_usernames
+                    ).values_list("platform_user_id", flat=True)
+                )
+            if human_ids and ChatMessage.objects.filter(
+                store=store, chat_id=str(chat_id), is_group_message=True,
+                customer__platform_user_id__in=human_ids,
+                created_at__gt=chat_message.created_at,
+            ).exists():
+                logger.info(
+                    f"[Task] Guruhda ega/xodim allaqachon javob bergan — AI javobi yuborilmadi | store={store.name}"
+                )
+                return
+
         # ── 6. Javobni platforma orqali yuborish ──────────────────────
+        # ⚠️ Guruhda bir nechta odam yozib turishi mumkin — javobni oddiy
+        # xabar sifatida yuborsak, kim so'ragani va botning kimga javob
+        # berayotgani chalkashib qolardi. Shaxsiy chatda esa reply shart
+        # emas (faqat 1 kishi bilan suhbat).
         sent = send_reply(
             store=store,
             platform=platform,
             chat_id=chat_id,
             text=ai_response.text,
             customer=customer,
+            reply_to_message_id=message_id if is_group else None,
         )
 
         if not sent:
@@ -600,13 +800,13 @@ def process_incoming_message(
             f"[Task] Vaqt limitini oshdi (soft) | "
             f"store_id={store_id} | msg_id={message_id}"
         )
-        _mark_message_failed(store_id, message_id, platform, "SoftTimeLimitExceeded")
+        _mark_message_failed(store_id, message_id, platform, "SoftTimeLimitExceeded", sender_id=sender_id)
 
     except MaxRetriesExceededError:
         logger.error(
             f"[Task] Max retry oshdi | store_id={store_id} | msg_id={message_id}"
         )
-        _mark_message_failed(store_id, message_id, platform, "MaxRetriesExceeded")
+        _mark_message_failed(store_id, message_id, platform, "MaxRetriesExceeded", sender_id=sender_id)
 
     except Exception as e:
         logger.error(
@@ -622,6 +822,7 @@ def process_incoming_message(
             platform=platform,
             retry_count=self.request.retries + 1,
             error=str(e),
+            sender_id=sender_id,
         )
 
         # Eksponensial backoff: 5s → 25s → 125s
@@ -630,7 +831,7 @@ def process_incoming_message(
         try:
             raise self.retry(exc=e, countdown=countdown)
         except MaxRetriesExceededError:
-            _mark_message_failed(store_id, message_id, platform, str(e))
+            _mark_message_failed(store_id, message_id, platform, str(e), sender_id=sender_id)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -678,7 +879,7 @@ def cleanup_old_messages():
 # YORDAMCHI FUNKSIYALAR
 # ─────────────────────────────────────────────────────────────
 
-def _mark_message_failed(store_id, message_id, platform, error_msg):
+def _mark_message_failed(store_id, message_id, platform, error_msg, sender_id=None):
     """ChatMessage'ni FAILED deb belgilaydi"""
     try:
         from apps.chat.models import ChatMessage
@@ -689,11 +890,18 @@ def _mark_message_failed(store_id, message_id, platform, error_msg):
         # "qaytarib" (regressiya) qo'yib, egasining dashboard/loglarida
         # yolg'on xato ko'rsatardi. Endi allaqachon COMPLETED bo'lgan
         # xabar hech qachon qayta yozilmaydi.
-        ChatMessage.all_objects.filter(
+        #
+        # ⚠️ `sender_id` (customer__platform_user_id) ham SHART — message_id
+        # faqat bitta suhbat ichida unikal, shusiz boshqa mijozning bir xil
+        # message_id'ga ega xabari xato FAILED deb belgilanib qolar edi.
+        qs = ChatMessage.all_objects.filter(
             store_id=store_id,
             message_id=message_id,
             platform=platform,
-        ).exclude(
+        )
+        if sender_id is not None:
+            qs = qs.filter(customer__platform_user_id=sender_id)
+        qs.exclude(
             processing_status=ChatMessage.ProcessingStatus.COMPLETED,
         ).update(
             processing_status=ChatMessage.ProcessingStatus.FAILED,
@@ -703,15 +911,18 @@ def _mark_message_failed(store_id, message_id, platform, error_msg):
         logger.error(f"_mark_message_failed xatosi: {e}")
 
 
-def _update_retry_count(store_id, message_id, platform, retry_count, error):
+def _update_retry_count(store_id, message_id, platform, retry_count, error, sender_id=None):
     """ChatMessage'da retry sonini yangilaydi"""
     try:
         from apps.chat.models import ChatMessage
-        ChatMessage.all_objects.filter(
+        qs = ChatMessage.all_objects.filter(
             store_id=store_id,
             message_id=message_id,
             platform=platform,
-        ).update(
+        )
+        if sender_id is not None:
+            qs = qs.filter(customer__platform_user_id=sender_id)
+        qs.update(
             retry_count=retry_count,
             error_message=str(error)[:500],
         )

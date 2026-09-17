@@ -80,17 +80,25 @@ class TelegramWebhookView(View):
             )
             return HttpResponse(status=200)
 
+        # 3.5 Bot guruhga/superguruhga QO'SHILGANDA Telegram doim shu
+        # update turini yuboradi ("message" kaliti bo'lmaydi, shuning
+        # uchun pastdagi parse_telegram_payload buni tushunmaydi — alohida,
+        # oldindan ushlanadi). Guruhni avtomatik bog'lash shu yerda
+        # amalga oshadi (qarang: _handle_my_chat_member).
+        if "my_chat_member" in payload:
+            self._handle_my_chat_member(payload, bot_token)
+            return HttpResponse(status=200)
+
         # 4. Payload'ni parse qilamiz
         message = parse_telegram_payload(payload)
         if not message:
             # Qo'llab-quvvatlanmaydigan update turi — OK qaytaramiz
             return HttpResponse(status=200)
 
-        # 4.4 Guruhga bot "Add to Group" havolasi (?startgroup=store_<uuid>)
-        # orqali qo'shilganda, Telegram guruhga avtomatik ravishda
-        # "/start@bot store_<uuid>" xabarini yuboradi — bu ODDIY mijoz
-        # xabari emas, bog'lash buyrug'i, shuning uchun alohida (sinxron,
-        # Celery'siz) ishlanadi.
+        # 4.4 Guruhda qo'lda yuborilgan "/start store_<uuid>" — masalan
+        # egasi botni startgroup havolasisiz, oddiy "Add member" orqali
+        # qo'shgan bo'lsa, shu buyruq bilan ham qo'lda bog'lay oladi
+        # (3.5-qadamdagi avtomatik bog'lashning zaxira/qo'lda varianti).
         if message.chat_type in ("group", "supergroup") and message.text.strip().startswith("/start"):
             self._handle_group_binding(message, bot_token)
             return HttpResponse(status=200)
@@ -135,7 +143,7 @@ class TelegramWebhookView(View):
         # orqali ikkilangan javob/Gemini chaqiruvlariga olib kelishi mumkin
         # edi. Endi Instagram bilan bir xil, navbatga qo'shishdan OLDIN
         # tekshiriladi.
-        if self._is_duplicate(store.id, message):
+        if self._is_duplicate(store.id, message, bot_token):
             logger.info(f"Telegram: dublikat xabar, o'tkazib yuborildi | msg_id={message.message_id}")
             return HttpResponse(status=200)
 
@@ -269,18 +277,46 @@ class TelegramWebhookView(View):
         # QANDAY do'konga biriktirilmaydi (None qaytariladi).
         return None
 
+    def _bind_group_to_store(self, store: Store, chat_id: str, bot_token: str) -> None:
+        """Guruhni berilgan do'konga bog'laydi va tasdiqlash xabarini yuboradi."""
+        from django.db import transaction
+        from apps.chat.senders import send_telegram_message
+
+        # Allaqachon aynan shu guruhga bog'langan bo'lsa — hech narsa
+        # o'zgarmaydi, qayta tasdiqlash xabarini yuborishning hojati yo'q
+        # (yuqoridagi update_id himoyasiga qo'shimcha ikkinchi himoya qatlami).
+        if str(store.tg_group_chat_id or "") == chat_id:
+            return
+
+        with transaction.atomic():
+            # Boshqa do'kon avval shu guruhga bog'langan bo'lsa — unique
+            # cheklovga urilmaslik uchun avval bo'shatib olamiz.
+            Store.objects.filter(tg_group_chat_id=chat_id).exclude(id=store.id).update(tg_group_chat_id=None)
+            Store.objects.filter(id=store.id).update(tg_group_chat_id=chat_id)
+
+        logger.info(f"Telegram: guruh bog'landi | store={store.name} | chat_id={chat_id}")
+        bot_mention = f"@{store.tg_bot_username}" if store.tg_bot_username else "botni"
+        send_telegram_message(
+            bot_token=bot_token,
+            chat_id=chat_id,
+            text=(
+                f"✅ Ushbu guruh <b>{store.name}</b> do'koniga muvaffaqiyatli ulandi!\n\n"
+                f"Endi a'zolar {bot_mention} belgilab yoki botning xabariga javob (reply) berib "
+                f"savol bersa, AI sotuvchi shu yerda javob beradi."
+            ),
+            parse_mode="HTML",
+        )
+
     def _handle_group_binding(self, message, bot_token: str) -> None:
         """
-        Guruhga bot "?startgroup=store_<uuid>" havolasi orqali qo'shilganda,
-        Telegram o'sha guruhga avtomatik "/start@bot store_<uuid>" xabarini
-        yuboradi — shu yerda ushlanadi va guruh shu Store'ga bog'lanadi.
+        Guruhda qo'lda yuborilgan "/start store_<uuid>" (yoki admin_<uuid>)
+        buyrug'ini ushlaydi va guruhni shu Store'ga bog'laydi.
 
         ⚠️ XAVFSIZLIK: faqat do'kon EGASI (tg_owner_chat_id mos keladigan
         Telegram foydalanuvchi) guruhni bog'lay oladi — aks holda istalgan
         kishi (masalan raqobatchi) boshqa birovning do'koniga tasodifiy
         yoki qasddan begona/spam guruhni bog'lab qo'yishi mumkin edi.
         """
-        from django.db import transaction
         from django.db.models import Q
         from apps.chat.senders import send_telegram_message
 
@@ -322,25 +358,109 @@ class TelegramWebhookView(View):
             )
             return
 
-        chat_id = str(message.chat_id)
-        with transaction.atomic():
-            # Boshqa do'kon avval shu guruhga bog'langan bo'lsa — unique
-            # cheklovga urilmaslik uchun avval bo'shatib olamiz.
-            Store.objects.filter(tg_group_chat_id=chat_id).exclude(id=target_store.id).update(tg_group_chat_id=None)
-            Store.objects.filter(id=target_store.id).update(tg_group_chat_id=chat_id)
+        self._bind_group_to_store(target_store, str(message.chat_id), bot_token)
 
-        logger.info(f"Telegram: guruh bog'landi | store={target_store.name} | chat_id={chat_id}")
-        bot_mention = f"@{target_store.tg_bot_username}" if target_store.tg_bot_username else "botni"
-        send_telegram_message(
-            bot_token=bot_token,
-            chat_id=chat_id,
-            text=(
-                f"✅ Ushbu guruh <b>{target_store.name}</b> do'koniga muvaffaqiyatli ulandi!\n\n"
-                f"Endi a'zolar {bot_mention} belgilab yoki botning xabariga javob (reply) berib "
-                f"savol bersa, AI sotuvchi shu yerda javob beradi."
-            ),
-            parse_mode="HTML",
-        )
+    def _handle_my_chat_member(self, payload: dict, bot_token: str) -> None:
+        """
+        Bot biror guruh/superguruhga QO'SHILGANDA Telegram doim yuboradigan
+        `my_chat_member` hodisasini ushlab, guruhni avtomatik bog'laydi.
+
+        ⚠️ BUG FIX: "Guruhga qo'shish" (?startgroup=store_<uuid>) havolasi
+        ishlatilganda Telegram guruhga avtomatik "/start store_<uuid>"
+        xabarini yuboradi deb kutilgan edi (_handle_group_binding shunga
+        mo'ljallangan) — lekin jonli testda bu xabar HECH QACHON kelmadi
+        (faqat `my_chat_member` va matnsiz "a'zo qo'shildi" xizmat xabari
+        keldi). Natijada do'kon egasi tugmani bosib botni guruhga qo'shsa
+        ham, guruh hech qachon bog'lanmasdi — egadan qo'lda buyruq yozishni
+        talab qilish tushunarsiz/ortiqcha UX edi. Endi buning o'rniga
+        Telegram ISHONCHLI yuboradigan `my_chat_member.from` (botni KIM
+        qo'shgani) ma'lumotidan foydalanamiz: agar o'sha odam tizimda
+        aynan BITTA do'konning egasi bo'lsa, guruh hech qanday qo'shimcha
+        buyruqsiz o'sha do'konga avtomatik bog'lanadi.
+        """
+        try:
+            event = payload.get("my_chat_member")
+            if not event:
+                return
+
+            # ⚠️ BUG FIX: Telegram ba'zan bitta hodisani (masalan tarmoq
+            # kechikishi yoki webhook javobi sekin bo'lganda) bir necha
+            # marta qayta yuborishi mumkin — bu oddiy xabarlar uchun
+            # `_is_duplicate` orqali ushlanadi, lekin `my_chat_member`
+            # alohida yo'l bo'lgani uchun bunday himoya yo'q edi. Natijada
+            # bitta "guruhga qo'shildi" hodisasi ikki marta qayta
+            # ishlanib, guruhga IKKITA bir xil tasdiqlash xabari ketardi
+            # (jonli testda aniqlandi). `update_id` — Telegram'ning har bir
+            # update uchun berilgan, takrorlanmaydigan raqami — shu orqali
+            # qisqa muddatli (10 daqiqa) idempotency ta'minlanadi.
+            update_id = payload.get("update_id")
+            if update_id is not None:
+                cache_key = f"my_chat_member_processed:{update_id}"
+                if not cache.add(cache_key, True, timeout=600):
+                    return
+
+            chat = event.get("chat", {})
+            if chat.get("type") not in ("group", "supergroup"):
+                return
+
+            new_status = event.get("new_chat_member", {}).get("status", "")
+            old_status = event.get("old_chat_member", {}).get("status", "")
+            chat_id = str(chat.get("id", ""))
+            if not chat_id:
+                return
+
+            joined_now = (
+                new_status in ("member", "administrator")
+                and old_status not in ("member", "administrator")
+            )
+            removed_now = (
+                new_status in ("left", "kicked")
+                and old_status in ("member", "administrator")
+            )
+
+            # ⚠️ Xavfsizlik to'ri: egasi BILMASDAN/ADASHIB botni noto'g'ri
+            # (masalan shaxsiy do'stlar) guruhga qo'shib yuborishi mumkin —
+            # bunday holatda botni o'sha guruhdan olib tashlash yetarli
+            # bo'lishi kerak, aks holda noto'g'ri bog'lanish "osilib"
+            # qolib, bot begona guruhda ishlashda davom etardi. Bot
+            # chiqarilganda/haydalganda, unga bog'langan do'kon bo'lsa —
+            # avtomatik bo'shatiladi.
+            if removed_now:
+                unbound = Store.objects.filter(tg_group_chat_id=chat_id).update(tg_group_chat_id=None)
+                if unbound:
+                    logger.info(f"Telegram: bot guruhdan olib tashlandi, bog'lanish bekor qilindi | chat_id={chat_id}")
+                return
+
+            if not joined_now:
+                return
+
+            adder_id = str(event.get("from", {}).get("id", ""))
+            if not adder_id:
+                return
+
+            matches = list(Store.objects.filter(
+                tg_owner_chat_id=adder_id,
+                is_active=True,
+                is_deleted=False,
+            ))
+            if not matches:
+                logger.info(
+                    f"Telegram: guruhga bot qo'shildi, lekin qo'shgan foydalanuvchi "
+                    f"({adder_id}) hech qanday do'kon egasi sifatida tanilmadi — "
+                    f"avtomatik bog'lanmadi | chat_id={chat_id}"
+                )
+                return
+            if len(matches) > 1:
+                logger.warning(
+                    f"Telegram: guruhga bot qo'shildi, lekin qo'shgan foydalanuvchi "
+                    f"({adder_id}) bir nechta do'konga ega — avtomatik bog'lash "
+                    f"noaniq, o'tkazib yuborildi | chat_id={chat_id}"
+                )
+                return
+
+            self._bind_group_to_store(matches[0], chat_id, bot_token)
+        except Exception as e:
+            logger.error(f"my_chat_member qayta ishlashda xato: {e}", exc_info=True)
 
     def _get_store_by_token(self, bot_token: str) -> Store | None:
         """Bot token bo'yicha aktiv do'konni topadi"""
@@ -367,13 +487,16 @@ class TelegramWebhookView(View):
             return None
 
 
-    def _is_duplicate(self, store_id, message: IncomingMessage) -> bool:
+    def _is_duplicate(self, store_id, message: IncomingMessage, bot_token: str) -> bool:
         """Idempotency: bu xabar avval qayta ishlanganmi?"""
         try:
             return ChatMessage.is_duplicate(
                 store_id=store_id,
                 message_id=message.message_id,
                 platform=message.platform,
+                sender_id=message.sender_id,
+                bot_token=bot_token,
+                chat_id=str(message.chat_id),
             )
         except Exception as e:
             logger.error(f"Idempotency tekshirishda xato: {e}", exc_info=True)
@@ -441,6 +564,7 @@ class InstagramWebhookView(View):
                     store_id=store.id,
                     message_id=message.message_id,
                     platform="instagram",
+                    sender_id=message.sender_id,
                 ):
                     logger.info(
                         f"Instagram: dublikat xabar skip | "
@@ -544,7 +668,7 @@ def webhook_health(request):
 
     return JsonResponse({
         "status": "ok" if bot_active else "degraded",
-        "service": "AI-Inbox Master SaaS Gateway",
+        "service": "Warmix Master SaaS Gateway",
         "bot_active": bot_active,
         "bot_username": f"@{bot_username}" if bot_username != "unknown" else None,
         "master_bot_model": True
