@@ -46,7 +46,7 @@ class Command(BaseCommand):
                 "ai_model": "gemini-3.6-flash",
                 "ai_active": True,
                 "tg_bot_token": demo_bot_token,
-                "tg_bot_username": "WarmixAi_bot",
+                "tg_bot_username": "LeadNodeBot",
             }
         )
 

@@ -91,7 +91,7 @@ class Command(BaseCommand):
                 # loyiha endi faqat education/services, "buyurtma" emas
                 # "lid" tushunchasi ishlatiladi.
                 description = (
-                    "🤖 Warmix — do'koningiz uchun sun'iy intellektli yordamchi.\n\n"
+                    "🤖 LeadNode — do'koningiz uchun sun'iy intellektli yordamchi.\n\n"
                     "✨ 24/7 mijozlarga javob beradi va qiziqqan mijozlarni tezkor saralab beradi!\n\n"
                     "Boshlash uchun sizga yuborilgan shaxsiy havola orqali kiring 👇"
                 )

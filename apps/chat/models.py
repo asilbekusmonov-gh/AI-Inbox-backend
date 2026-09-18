@@ -63,7 +63,7 @@ class ChatMessage(BaseModel):
         default="",
         help_text=(
             "Xabar qaysi bot tokeni orqali kelgan (idempotency kafolati). "
-            "Bot almashtirilganda (masalan Ai_InboxBot → WarmixAi_bot) "
+            "Bot almashtirilganda (masalan WarmixAi_bot → LeadNodeBot) "
             "Telegram har bir bot uchun message_id'ni 1'dan qaytadan "
             "boshlaydi — shu bayroqsiz eski botdagi kichik ID'lar yangi "
             "botdagi xabarlarga xato ravishda 'dublikat' deb urib qolardi."

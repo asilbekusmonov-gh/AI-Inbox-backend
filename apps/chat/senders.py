@@ -206,6 +206,51 @@ def send_telegram_voice(
 
 
 
+def send_telegram_document(
+    bot_token: str,
+    chat_id: str,
+    file_bytes: bytes,
+    filename: str,
+    content_type: str = "application/octet-stream",
+    caption: str = "",
+) -> bool:
+    """
+    Telegram bot API /sendDocument orqali fayl (masalan Excel eksporti)
+    yuboradi.
+
+    ⚠️ Mini App ichidagi JS "yuklab olish" (blob/anchor klik yoki hatto
+    Telegram'ning o'z `downloadFile()` Mini App metodi) ko'plab
+    klientlarda (ayniqsa Desktop) beqaror ishlaydi — jonli testda
+    aniqlandi. Oddiy chat XABARI sifatida yuborilgan hujjat esa Telegram
+    ilovasining eng asosiy, barcha platformalarda (mobil/desktop/web)
+    bir xilda ishlaydigan funksiyasi, shuning uchun eng ishonchli yo'l.
+    """
+    if not bot_token or not chat_id or not file_bytes:
+        logger.warning(f"send_telegram_document: bo'sh parametr | chat_id={chat_id}")
+        return False
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+    files = {
+        "document": (filename, file_bytes, content_type),
+    }
+    data = {"chat_id": chat_id}
+    if caption:
+        data["caption"] = caption
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(url, data=data, files=files)
+            res_data = resp.json()
+            if resp.status_code == 200 and res_data.get("ok"):
+                logger.info(f"Hujjat Telegram chat_id={chat_id}'ga muvaffaqiyatli yuborildi: {filename}")
+                return True
+            logger.error(f"Telegram sendDocument xatosi: {resp.status_code} | {res_data}")
+            return False
+    except Exception as e:
+        logger.error(f"Telegram sendDocument exception: {e}", exc_info=True)
+        return False
+
+
 def send_telegram_lead_notification(
     bot_token: str,
     owner_chat_id: str,

@@ -1,5 +1,5 @@
 """
-API v1 Router — Warmix
+API v1 Router — LeadNode
 
 Endpoints:
 - /api/v1/schema/ -> OpenAPI 3 Schema (JSON)

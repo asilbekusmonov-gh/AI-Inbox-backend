@@ -668,7 +668,7 @@ def webhook_health(request):
 
     return JsonResponse({
         "status": "ok" if bot_active else "degraded",
-        "service": "Warmix Master SaaS Gateway",
+        "service": "LeadNode Master SaaS Gateway",
         "bot_active": bot_active,
         "bot_username": f"@{bot_username}" if bot_username != "unknown" else None,
         "master_bot_model": True

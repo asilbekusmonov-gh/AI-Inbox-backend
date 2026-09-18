@@ -55,7 +55,7 @@ def push_lead_to_bitrix24(webhook_url: str, lead) -> bool:
     if lead.interested_course_id:
         title = f"{title} — {lead.interested_course.name}"
 
-    comments = f"Lid raqami: {lead.lead_number} | Holat: {lead.get_lead_status_display()} | Manba: Warmix bot"
+    comments = f"Lid raqami: {lead.lead_number} | Holat: {lead.get_lead_status_display()} | Manba: LeadNode bot"
     if lead.notes:
         comments += f"\nIzoh: {lead.notes}"
 
@@ -68,7 +68,7 @@ def push_lead_to_bitrix24(webhook_url: str, lead) -> bool:
                 {"typeId": "PHONE", "valueType": "WORK", "value": lead.customer_phone},
             ],
             "comments": comments,
-            "sourceDescription": "Warmix",
+            "sourceDescription": "LeadNode",
         },
     }
 
