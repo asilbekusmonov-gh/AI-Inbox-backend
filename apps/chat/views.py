@@ -398,9 +398,18 @@ class ChatThreadListView(APIView):
         # suhbatlar) olinadi — inbox ro'yxati aylanma emas, "so'nggi faollik"
         # ko'rinishi bo'lgani uchun bu to'g'ri xulq-atvor ham hisoblanadi.
         RECENT_MESSAGE_LIMIT = 500
+        threads_qs = ChatMessage.objects.filter(store=target_store, is_deleted=False)
+        # ⚠️ Do'kon EGASINING botga o'zi (test/tekshirish uchun) yozgan
+        # xabarlari — bu haqiqiy mijoz emas, shuning uchun Inbox'da
+        # ko'rsatilmaydi. Aks holda egasi o'z-o'ziga yozgan "salom",
+        # "/start" kabi test xabarlari real mijozlar orasida chalkash
+        # ko'rinardi (foydalanuvchi buni jonli aniqladi).
+        if target_store.tg_owner_chat_id:
+            threads_qs = threads_qs.exclude(
+                customer__platform_user_id=str(target_store.tg_owner_chat_id)
+            )
         recent_messages = list(
-            ChatMessage.objects
-            .filter(store=target_store, is_deleted=False)
+            threads_qs
             .select_related("customer")
             .order_by("-created_at")[:RECENT_MESSAGE_LIMIT]
         )

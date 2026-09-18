@@ -15,6 +15,7 @@ Edge-case qoidalari:
 """
 import json
 import logging
+import re
 import time
 from typing import Optional
 from dataclasses import dataclass
@@ -98,6 +99,7 @@ _LEAD_QUALIFICATION_RULE = """
   • "warm" (iliq) — agar mijoz: aniq sana/vaqtni o'zi so'rasa yoki taklif qilingan vaqtni tasdiqlasa; "ha, roziman/yoziling/kelaman" kabi aniq tasdiq bersa; bir nechta jiddiy, aniq savol bersa (narx, jadval, joylashuv); yoki so'ralmasdan o'zi telefon raqamini yuborsa.
   • "cold" (sovuq) — agar mijoz: "o'ylab ko'raman", "keyinroq yozaman", "hozircha kerak emas" desa; narxni eshitib indamay qolsa yoki e'tiroz bildirsa; yoki ism/raqamni faqat qat'iy so'ralgandan keyin, istamay bergandek bersa.
   • Aniq bo'lmasa — "cold" deb belgilang.
+- MUHIM — "notes" MAYDONI MAJBURIY VA MAZMUNLI BO'LSIN (shunchaki "ixtiyoriy izoh" emas!): bu — do'kon egasi/operatorning mijozga qo'ng'iroq qilishdan OLDIN o'qiydigan YAGONA qisqa xulosa, shuning uchun operator suhbatni boshidan o'qimasdan ham mijozning ANIQ nima uchun yozilganini, nimani xohlaganini tushunishi kerak. 1 gap (taxminan 10-20 so'z) yozing: mijozning maqsadi/sababi nima (masalan: "IELTS'dan 7.0 ball olishni maqsad qilgan, 2 oy ichida tayyorlanmoqchi" yoki "Bolasi uchun boshlang'ich daraja qidiryapti, kechqurun vaqtlar qulay"). Agar suhbatda buning uchun aniq sabab aytilmagan bo'lsa, "Aniq sabab aytilmadi" deb yozing — HECH QACHON bo'sh qoldirmang.
 """
 
 CATEGORY_PROMPTS = {
@@ -107,11 +109,15 @@ Asosiy maqsadingiz: Kurslar haqida ma'lumot berish va mijozni "Sinov Darsi" (Fre
 
 Yo'riqnoma:
 - Kurslar tavsifini berishda dars davomiyligi, narxi va qulayliklarini tushuntiring.
-- Mijozni qiziqtirgan kurs bo'yicha Bepul Sinov darsiga taklif qiling va quyidagilarni so'rang:
+- Mijozni qiziqtirgan kurs bo'yicha Bepul Sinov darsiga taklif qiling.
+- MAJBURIY (lid yaratish uchun shart, boshqa hech narsa kutmasdan so'rang):
   1. O'quvchi/Mijozning ismi
   2. Telefon raqami (+998 formatida)
   3. Kurs nomi
+- IXTIYORIY (so'rash mumkin, lekin LIDNI TO'XTATIB QO'YMASLIGI kerak):
   4. Sinov darsining qulay vaqti (katalogdagi "trial_lesson_days" ro'yxatidan taklif qiling)
+- MUHIM — VAQTNI MAJBUR QILMANG: yuqoridagi 3 ta majburiy ma'lumot (ism, telefon, kurs) qo'lga kirgan zahoti, "preferred_time" haliyam yo'q bo'lsa ham lid JSON'ini DARHOL yarating (preferred_time'ni bo'sh qoldiring). Vaqtni faqat BIR MARTA so'rang — agar mijoz javob bermasa, "keyinroq aniqlashtiramiz" desa, yoki "sinov darsisiz to'g'ridan-to'g'ri yozilmoqchiman" desa — buni hurmat qiling, qayta-qayta so'ramang, shu zahoti lid yaratib yuboring. Aks holda mijoz vaqt aytmagani uchun lid UMUMAN yaratilmay, egasi bu qiziqqan mijozdan butunlay bexabar qolib ketadi — bu eng katta xato.
+- MUHIM — ONLAYN KURSLAR: agar kurs onlayn/masofaviy formatda bo'lsa (katalogda shunday belgilangan bo'lsa yoki mijoz "onlayn" desa), "sinov darsi vaqti"ni SO'RAMANG — bunday kurslarda aniq kun/soat tanlash unchalik ahamiyatli emas, eng muhimi operator mijoz bilan tezroq bog'lanishi. Shunchaki ism+telefon+kurs olib, "Operatorimiz tez orada siz bilan bog'lanadi" deb lid yaratib yuboring.
 {_LEAD_QUALIFICATION_RULE}
 - Ma'lumotlar olingach, javobingiz oxirida AYNAN quyidagi JSON formatni qaytaring:
 ```json
@@ -122,7 +128,7 @@ lid_malumotlari:
   "course_name": "Python Dasturlash",
   "preferred_time": "Dushanba 14:00",
   "lead_status": "warm",
-  "notes": "Noldan boshlamoqchi (ixtiyoriy izohlar)"
+  "notes": "Noldan boshlab IELTS'ga tayyorgarlik ko'rmoqchi, 3 oy vaqti bor"
 }}
 ```
 """,
@@ -133,11 +139,14 @@ Asosiy maqsadingiz: Ko'rsatiladigan xizmatlar, narxlar va ustalar haqida ma'lumo
 
 Yo'riqnoma:
 - Mijoz xizmatga yozilmoqchi bo'lganida quyidagi ma'lumotlarni to'plang:
+- MAJBURIY (lid yaratish uchun shart, boshqa hech narsa kutmasdan so'rang):
   1. Mijozning ismi
   2. Telefon raqami (+998 formatida)
   3. Qaysi xizmat turini tanlagani
+- IXTIYORIY (so'rash mumkin, lekin LIDNI TO'XTATIB QO'YMASLIGI kerak):
   4. Tanlangan mutaxassis/usta (agar katalogda ko'rsatilgan bo'lsa)
   5. Band qilish vaqti va sanasi (katalogdagi mavjud vaqtlardan kelib chiqib taklif qiling)
+- MUHIM — VAQT/USTANI MAJBUR QILMANG: yuqoridagi 3 ta majburiy ma'lumot (ism, telefon, xizmat turi) qo'lga kirgan zahoti, mutaxassis/vaqt haliyam aniqlanmagan bo'lsa ham lid JSON'ini DARHOL yarating (bo'sh qoldiring). Buni faqat BIR MARTA so'rang — agar mijoz javob bermasa, "operator o'zi ayta qolsin" desa, yoki aniq vaqt aytmasa — qayta-qayta so'ramang, shu zahoti lid yaratib yuboring. Band qilish vaqtini ANIQLASHTIRISH — operatorning o'zi mijozga qo'ng'iroq qilib kelishishi mumkin bo'lgan ish, botning vazifasi emas. Aks holda mijoz vaqt aytmagani uchun lid UMUMAN yaratilmay, egasi bu qiziqqan mijozdan butunlay bexabar qolib ketadi — bu eng katta xato.
 {_LEAD_QUALIFICATION_RULE}
 - Ma'lumotlar olingach, javobingiz oxirida AYNAN quyidagi JSON formatni qaytaring:
 ```json
@@ -149,7 +158,7 @@ band_qilish_malumotlari:
   "specialist": "Usta Ravshan",
   "booking_time": "2026-08-27 15:30",
   "lead_status": "warm",
-  "notes": "Soch yuvish xizmati bilan birga (ixtiyoriy izohlar)"
+  "notes": "To'yga borishdan oldin soch yuvish xizmati bilan birga qildirmoqchi"
 }}
 ```
 """
@@ -761,14 +770,26 @@ def _call_gemini(store, customer, user_message: str, model_name: str = "gemini-3
         ),
     )
 
+    # ⚠️ BUG FIX: `request_options.timeout` berilmagan bo'lsa, Gemini so'rovi
+    # tarmoq/API muammosi bo'lsa CHEKSIZ (yoki juda uzoq) osilib qolishi
+    # mumkin — jonli production loglarida 120+ soniya osilib qolib, faqat
+    # Gunicorn/Celery worker'ning O'ZINI o'ldiruvchi timeout'i tomonidan
+    # to'xtatilgan holat kuzatildi. Bu bitta mijoz uchun EMAS — celery
+    # worker'ning o'zi shu vaqt davomida band bo'lib, navbatdagi BOSHQA
+    # mijozlarning xabarlarini ham kutdirib qo'yadi. Endi 25 soniyadan
+    # keyin so'rov tashqarida (yuqoridagi `for` halqasi va uning
+    # `except Exception` bandi) aniq xato sifatida ushlanadi — keyingi
+    # fallback modelga o'tiladi yoki FALLBACK_RESPONSE qaytariladi.
+    _request_options = {"timeout": 25}
+
     # Suhbat boshlash (tarix bilan, agar xato bo'lsa tarixsiz)
     try:
         chat = model.start_chat(history=history)
-        response = chat.send_message(user_message)
+        response = chat.send_message(user_message, request_options=_request_options)
     except Exception as e:
         logger.warning(f"Suhbat tarixida xato, tarixsiz qayta urilinmoqda: {e}")
         chat = model.start_chat(history=[])
-        response = chat.send_message(user_message)
+        response = chat.send_message(user_message, request_options=_request_options)
 
     # Javob matni
     response_text = response.text or ""
@@ -948,5 +969,13 @@ def _clean_response_text(text: str) -> str:
         if idx != -1:
             earliest_cut = min(earliest_cut, idx)
     text = text[:earliest_cut]
+
+    # ⚠️ BUG FIX: Gemini javoblarida ko'pincha Markdown uslubi (**qalin
+    # matn**) ishlatiladi, lekin biz Telegram'ga har doim `parse_mode=
+    # "HTML"` bilan yuboramiz — HTML bu yulduzchalarni umuman tushunmaydi
+    # va ularni so'zma-so'z (masalan "**Faol**") ko'rsatib qo'yadi
+    # (foydalanuvchi buni jonli suhbatda aniqladi). Shu sabab yuborishdan
+    # oldin **qalin**ni haqiqiy HTML <b>qalin</b>ga aylantiramiz.
+    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
 
     return text.strip()

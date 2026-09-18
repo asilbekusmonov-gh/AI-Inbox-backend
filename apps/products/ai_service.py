@@ -76,7 +76,13 @@ def generate_product_description(
         + "\n\nTavsif:"
     )
 
-    response = model.generate_content(prompt)
+    # ⚠️ BUG FIX: timeout berilmagan bo'lsa, bu so'rov tarmoq/API muammosi
+    # bo'lganda cheksiz osilib qolishi mumkin edi — TWA'da "Yozilmoqda..."
+    # tugmasi abadiy aylanib qolgan holat jonli aniqlandi (backend loglarida
+    # Gunicorn worker 120+ soniyadan keyin majburan o'ldirilgani ko'rindi).
+    # Endi 25 soniyadan keyin aniq xato ko'tariladi — view.py buni ushlab,
+    # foydalanuvchiga tushunarli xabar bilan qaytaradi.
+    response = model.generate_content(prompt, request_options={"timeout": 25})
     text = (response.text or "").strip()
     if not text:
         raise ValueError("Gemini bo'sh javob qaytardi")
@@ -141,7 +147,7 @@ def parse_catalog_text(raw_text: str, category_type: str) -> list[dict]:
         f"Matn:\n{raw_text}"
     )
 
-    response = model.generate_content(prompt)
+    response = model.generate_content(prompt, request_options={"timeout": 25})
     text = (response.text or "").strip()
     if not text:
         raise ValueError("Gemini bo'sh javob qaytardi")
