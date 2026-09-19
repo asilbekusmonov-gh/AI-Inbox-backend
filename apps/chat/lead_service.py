@@ -276,3 +276,43 @@ def sync_lead_to_bitrix24(store, lead) -> bool:
             exc_info=True,
         )
         return False
+
+
+def sync_lead_to_google_sheets(store, lead) -> bool:
+    """
+    Do'konda Google Sheets webhook ulangan bo'lsa, yangi lidni avtomatik
+    o'sha yerga ham yuboradi (real vaqtda, lid yaratilishi bilan).
+
+    Bitrix24'dan mustaqil ishlaydi — bitta do'kon ikkalasini ham
+    (yoki faqat bittasini) yoqib qo'yishi mumkin.
+
+    Returns:
+        True — muvaffaqiyatli yuborildi
+        False — webhook sozlanmagan yoki yuborishda xato
+    """
+    from django.utils import timezone
+    from apps.integrations.google_sheets import push_lead_to_google_sheets
+
+    if not store.google_sheets_webhook_url:
+        return False
+
+    try:
+        success = push_lead_to_google_sheets(webhook_url=store.google_sheets_webhook_url, lead=lead)
+
+        if success:
+            from apps.orders.models import Lead
+            Lead.objects.filter(id=lead.id).update(
+                google_sheets_synced_at=timezone.now(),
+            )
+            logger.info(f"Google Sheets'ga yuborildi: {lead.lead_number}")
+        else:
+            logger.warning(f"Google Sheets'ga yuborilmadi: {lead.lead_number}")
+
+        return success
+
+    except Exception as e:
+        logger.error(
+            f"Google Sheets'ga yuborishda xato: {e}",
+            exc_info=True,
+        )
+        return False

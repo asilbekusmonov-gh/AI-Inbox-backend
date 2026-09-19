@@ -143,6 +143,19 @@ class Lead(BaseModel):
         help_text="Xabarnoma yuborilgan vaqt"
     )
 
+    # ⚠️ `exported_to`/`exported_at` Bitrix24'ning "so'nggi eksport"
+    # holatini bildiradi (retry task shu maydonga qarab ishlaydi) — Google
+    # Sheets shu bilan BIR VAQTDA, MUSTAQIL ravishda ham ulangan bo'lishi
+    # mumkin (do'kon ikkalasini ham yoqib qo'yishi mumkin), shuning uchun
+    # bitta umumiy enum o'rniga alohida, `owner_notified_at` bilan bir xil
+    # uslubdagi maydon ishlatiladi: bo'sh — hali yuborilmagan/muvaffaqiyat-
+    # siz, to'ldirilgan — muvaffaqiyatli yuborilgan vaqt.
+    google_sheets_synced_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Google Sheets'ga muvaffaqiyatli yuborilgan vaqt (bo'sh — hali yuborilmagan)"
+    )
+
     class Meta:
         verbose_name = "Lid"
         verbose_name_plural = "Lidlar"

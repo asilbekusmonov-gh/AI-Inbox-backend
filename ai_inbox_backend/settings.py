@@ -189,6 +189,11 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 60 * 30,  # Har 30 daqiqada bir marta
         "options": {"queue": "maintenance"},
     },
+    "retry-failed-google-sheets-exports": {
+        "task": "apps.orders.tasks.retry_failed_google_sheets_exports",
+        "schedule": 60 * 30,  # Har 30 daqiqada bir marta
+        "options": {"queue": "maintenance"},
+    },
 }
 
 

@@ -21,6 +21,7 @@ class StoreSerializer(serializers.ModelSerializer):
     telegram_connected = serializers.SerializerMethodField()
     instagram_connected = serializers.SerializerMethodField()
     bitrix24_connected = serializers.SerializerMethodField()
+    google_sheets_connected = serializers.SerializerMethodField()
     telegram_group_connected = serializers.SerializerMethodField()
 
     class Meta:
@@ -43,6 +44,7 @@ class StoreSerializer(serializers.ModelSerializer):
             "telegram_connected",
             "instagram_connected",
             "bitrix24_connected",
+            "google_sheets_connected",
             "telegram_group_connected",
             "tg_bot_username",
             "created_at",
@@ -67,6 +69,9 @@ class StoreSerializer(serializers.ModelSerializer):
 
     def get_bitrix24_connected(self, obj) -> bool:
         return obj.has_bitrix24
+
+    def get_google_sheets_connected(self, obj) -> bool:
+        return obj.has_google_sheets
 
 
 class StoreConfigUpdateSerializer(serializers.ModelSerializer):
@@ -100,6 +105,7 @@ class StoreConfigUpdateSerializer(serializers.ModelSerializer):
             "ig_page_id",
             "ig_access_token",
             "bitrix24_webhook_url",
+            "google_sheets_webhook_url",
         ]
         extra_kwargs = {
             "ig_access_token": {"write_only": True},
@@ -109,6 +115,9 @@ class StoreConfigUpdateSerializer(serializers.ModelSerializer):
             # Ulanganligini tekshirish uchun StoreSerializer'dagi
             # "bitrix24_connected" (bool) dan foydalaniladi.
             "bitrix24_webhook_url": {"write_only": True},
+            # Xuddi shu sabab bilan Google Sheets Apps Script URL'i ham
+            # write_only — "google_sheets_connected" (bool) orqali tekshiriladi.
+            "google_sheets_webhook_url": {"write_only": True},
         }
 
 

@@ -134,6 +134,21 @@ class Store(BaseModel):
         help_text="Bitrix24 inbound webhook manzili (masalan: https://company.bitrix24.com/rest/1/xxxxxxxx/) — yangi lidlar avtomatik shu yerga yuboriladi"
     )
 
+    # ── Google Sheets integratsiyasi ─────────────────────────────
+    # ⚠️ Rasmiy Google Sheets API OAuth oqimi (Google Cloud loyihasi,
+    # consent screen tasdiqlanishi) kichik SMB mijozlari uchun ortiqcha
+    # murakkab — shu sabab Bitrix24 bilan BIR XIL, oddiy "webhook URL"
+    # yondashuvi qo'llanildi: do'kon egasi o'z jadvalida kichik Apps
+    # Script joylashtirib, uni Web App sifatida deploy qiladi va olingan
+    # URL'ni shu yerga qo'yadi (apps/integrations/google_sheets.py'da
+    # to'liq Apps Script namunasi bor).
+    google_sheets_webhook_url = models.CharField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="Google Sheets Apps Script Web App manzili — yangi lidlar avtomatik shu yerga (qator sifatida) yuboriladi"
+    )
+
     # ── AI sozlamalari ─────────────────────────────────────────
     ai_active = models.BooleanField(
         default=True,
@@ -212,6 +227,11 @@ class Store(BaseModel):
     def has_bitrix24(self) -> bool:
         """Bitrix24 webhook ulangan"""
         return bool(self.bitrix24_webhook_url)
+
+    @property
+    def has_google_sheets(self) -> bool:
+        """Google Sheets webhook ulangan"""
+        return bool(self.google_sheets_webhook_url)
 
     @property
     def has_telegram_group(self) -> bool:

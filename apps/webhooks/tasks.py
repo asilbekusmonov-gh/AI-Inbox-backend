@@ -131,7 +131,7 @@ def process_incoming_message(
     from apps.chat.models import ChatMessage
     from apps.chat.ai_service import get_ai_response
     from apps.chat.senders import send_reply
-    from apps.chat.lead_service import create_lead_from_ai_data, notify_store_owner, sync_lead_to_bitrix24
+    from apps.chat.lead_service import create_lead_from_ai_data, notify_store_owner, sync_lead_to_bitrix24, sync_lead_to_google_sheets
 
     logger.info(
         f"[Task] Boshlandi | store={store_id[:8]} | "
@@ -772,6 +772,9 @@ def process_incoming_message(
                 notify_store_owner(store=store, lead=lead)
                 # Bitrix24 ulangan bo'lsa — avtomatik sinxronizatsiya
                 sync_lead_to_bitrix24(store=store, lead=lead)
+                # Google Sheets ulangan bo'lsa — avtomatik sinxronizatsiya
+                # (Bitrix24'dan mustaqil, ikkalasi ham bir vaqtda ishlashi mumkin)
+                sync_lead_to_google_sheets(store=store, lead=lead)
             else:
                 logger.warning(
                     f"[Task] Lid aniqlandi lekin saqlanmadi! "
