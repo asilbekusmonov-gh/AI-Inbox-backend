@@ -74,6 +74,13 @@ class Command(BaseCommand):
             category_type=category,
             platform=Store.Platform.TELEGRAM,
             tg_bot_token=settings.TELEGRAM_BOT_TOKEN,
+            # ⚠️ BUG FIX: bu maydon avval bo'sh qoldirilardi — Sozlamalar
+            # sahifasidagi "Guruhga qo'shish" havolasi (`?startgroup=...`)
+            # aynan shu qiymatga bog'liq, shuning uchun yangi yaratilgan
+            # do'konlarda ega hech qachon guruh qo'shish tugmasini ko'ra
+            # olmasdi ("avval Telegram botni ulang" degan xabar tursa ham,
+            # bot allaqachon ulangan edi — jonli testda aniqlandi).
+            tg_bot_username=bot_username,
         )
 
         admin_link = f"https://t.me/{bot_username}?start=admin_{store.id}"

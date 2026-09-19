@@ -12,9 +12,23 @@ qo'yiladi.
 """
 import logging
 import re
+from datetime import timedelta
 from typing import Optional
 
+from django.utils import timezone
+
 logger = logging.getLogger("apps.chat")
+
+# ⚠️ BUG FIX: AI bitta suhbat davomida lid JSON blokini ketma-ket bir
+# necha xabarda qaytarib yuborishi mumkin (masalan mijoz ketma-ket ikkita
+# qisqa xabar yozsa, AI ikkalasida ham "ro'yxatdan o'tkazaman" deb hisoblab,
+# lid blokini takrorlashi mumkin) — bu avval HAR SAFAR yangi Lead yaratardi,
+# jonli holatda bitta mijoz uchun bir daqiqa ichida ikkita bir xil "YANGI
+# LID!" xabarnomasi kelib, do'kon egasini chalg'itgan va ikki marta
+# qo'ng'iroq qilish xavfini tug'dirgan edi. Shu sabab shu mijoz uchun
+# so'nggi bir necha daqiqa ichida allaqachon lid yaratilgan bo'lsa, qayta
+# yaratilmaydi.
+_DUPLICATE_LEAD_WINDOW_MINUTES = 10
 
 
 def _find_interested_course(store, name: str):
@@ -95,7 +109,11 @@ def create_lead_from_ai_data(
 
     Returns:
         Lead — muvaffaqiyatli yaratildi
-        None — xato yuz berdi (majburiy maydon yo'q)
+        None — xato yuz berdi (majburiy maydon yo'q) YOKI shu mijoz uchun
+               so'nggi bir necha daqiqa ichida allaqachon lid yaratilgan
+               (takroriy AI chiqishi — pastga qarang), shuning uchun
+               chaqiruvchi (webhooks/tasks.py) qayta egaga xabar/CRM
+               eksportini yubormaydi.
     """
     from apps.orders.models import Lead
 
@@ -136,6 +154,18 @@ def create_lead_from_ai_data(
         lead_status = str(lead_data.get("lead_status", "")).strip().lower()
         if lead_status not in (Lead.LeadStatus.WARM, Lead.LeadStatus.COLD):
             lead_status = Lead.LeadStatus.UNQUALIFIED
+
+        recent_duplicate = Lead.objects.filter(
+            store=store, customer=customer, is_deleted=False,
+            created_at__gte=timezone.now() - timedelta(minutes=_DUPLICATE_LEAD_WINDOW_MINUTES),
+        ).order_by("-created_at").first()
+        if recent_duplicate:
+            logger.info(
+                f"Lid yaratish o'tkazib yuborildi (takroriy, {_DUPLICATE_LEAD_WINDOW_MINUTES} daqiqa "
+                f"ichida allaqachon bor) — mavjud lid: {recent_duplicate.lead_number} | "
+                f"do'kon={store.name} | mijoz={full_name}"
+            )
+            return None
 
         lead = Lead.objects.create(
             store=store,
@@ -260,9 +290,16 @@ def sync_lead_to_bitrix24(store, lead) -> bool:
 
         if success:
             from apps.orders.models import Lead
+            # ⚠️ `exported_to`/`exported_at` — faqat ko'rsatish uchun
+            # (oxirgi eksport qaysi kanal ekanini bildiradi). Retry
+            # vazifasi esa `bitrix24_synced_at`ga qaraydi — bu Excel
+            # eksportidan MUSTAQIL, shuning uchun avval Excel'ga
+            # yuklab olingan lid ham endi to'g'ri "sinxronlangan" deb
+            # belgilanadi.
             Lead.objects.filter(id=lead.id).update(
                 exported_to=Lead.ExportStatus.BITRIX24,
                 exported_at=timezone.now(),
+                bitrix24_synced_at=timezone.now(),
             )
             logger.info(f"Bitrix24'ga yuborildi: {lead.lead_number}")
         else:

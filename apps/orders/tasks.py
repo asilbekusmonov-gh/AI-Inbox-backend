@@ -38,6 +38,14 @@ def retry_failed_bitrix_exports(self):
     (masalan oylar oldingi) muvaffaqiyatsiz urinishlarni abadiy qayta
     urinaverish ma'nosiz, ehtimol Bitrix24 sozlamasi o'sha vaqtda
     noto'g'ri bo'lgan yoki lid endi dolzarb emas.
+
+    ⚠️ BUG FIX: avval bu yerda `exported_to=NONE` bo'yicha filtrlanardi —
+    ya'ni agar ega Bitrix24 ulashdan OLDIN "Excel'ni chatga yuborish"
+    tugmasini bir marta bossa (bu BARCHA lidlarni `exported_to="excel"`
+    deb belgilaydi), o'sha lidlar bu yerda "allaqachon eksport qilingan"
+    deb hisoblanib, Bitrix24 keyinroq ulansa ham HECH QACHON avtomatik
+    yuborilmasdi (jonli holatda aniqlandi). Endi Excel holatidan mustaqil
+    `bitrix24_synced_at` maydoniga qaraladi.
     """
     from apps.orders.models import Lead
     from apps.chat.lead_service import sync_lead_to_bitrix24
@@ -45,7 +53,7 @@ def retry_failed_bitrix_exports(self):
     cutoff = timezone.now() - timedelta(days=7)
 
     pending_leads = Lead.objects.filter(
-        exported_to=Lead.ExportStatus.NONE,
+        bitrix24_synced_at__isnull=True,
         is_deleted=False,
         created_at__gte=cutoff,
         store__bitrix24_webhook_url__isnull=False,

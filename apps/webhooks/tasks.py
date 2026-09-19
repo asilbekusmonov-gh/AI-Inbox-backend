@@ -479,18 +479,29 @@ def process_incoming_message(
                 f"[Task] Guruhda {who}ning o'zi yozdi — AI sotuv "
                 f"javobi berilmadi | store={store.name} | botga qaratilganmi={addressed_to_bot}"
             )
+            # ⚠️ BUG FIX: avval bu "tanidim" ack'i ega/xodim botga qaratib
+            # yozgan HAR SAFAR qayta yuborilardi — agar ular ketma-ket bir
+            # necha marta botga reply/mention qilib yozsa (jonli holatda
+            # kuzatilgan: "Ha zor", "Bo'ldi yozma" kabi qisqa xabarlar ham
+            # bot bilan bog'liq deb hisoblanib), guruh xuddi shu bir xil
+            # ack matni bilan to'lib ketardi. Bu xabar — bir martalik
+            # "bilib qo'ying" eslatmasi, shuning uchun endi shu ega/xodim
+            # uchun 24 soatda faqat BIR MARTA yuboriladi (`cache.add` —
+            # atomik "hali yo'q bo'lsa yoz" operatsiyasi).
             if addressed_to_bot:
-                ack_text = (
-                    "👋 Sizni do'kon egasi sifatida taniyman, shuning uchun savdo taklifi qilmayman — bu yerda faqat mijozlaringiz yozganda AI ishga tushadi."
-                    if is_recognized_owner else
-                    "👋 Sizni jamoa xodimi sifatida taniyman, shuning uchun savdo taklifi qilmayman — bu yerda faqat mijozlar yozganda AI ishga tushadi."
-                )
-                _send_command_reply(
-                    store, customer, platform, chat_id,
-                    text=ack_text,
-                    is_group_message=is_group,
-                    reply_to_message_id=message_id,
-                )
+                ack_cooldown_key = f"group_ack_sent:{store.id}:{sender_id}"
+                if cache.add(ack_cooldown_key, True, timeout=60 * 60 * 24):
+                    ack_text = (
+                        "👋 Sizni do'kon egasi sifatida taniyman, shuning uchun savdo taklifi qilmayman — bu yerda faqat mijozlaringiz yozganda AI ishga tushadi."
+                        if is_recognized_owner else
+                        "👋 Sizni jamoa xodimi sifatida taniyman, shuning uchun savdo taklifi qilmayman — bu yerda faqat mijozlar yozganda AI ishga tushadi."
+                    )
+                    _send_command_reply(
+                        store, customer, platform, chat_id,
+                        text=ack_text,
+                        is_group_message=is_group,
+                        reply_to_message_id=message_id,
+                    )
             ChatMessage.objects.filter(id=chat_message.id).update(
                 processing_status=ChatMessage.ProcessingStatus.COMPLETED
             )
@@ -563,6 +574,49 @@ def process_incoming_message(
                 f"customer_ai_active={getattr(customer, 'ai_active', True)}"
             )
             # Dastlabki xabarni COMPLETED deb belgilaymiz va javob qaytarmaymiz
+            ChatMessage.objects.filter(id=chat_message.id).update(
+                processing_status=ChatMessage.ProcessingStatus.COMPLETED
+            )
+            return
+
+        # ── 4.8. Mijoz allaqachon lid bo'lib bo'lgan bo'lsa — AI'ni
+        # qayta chaqirmasdan, oddiy "operatorlarimiz bog'lanadi" javobi ──
+        # ⚠️ BUG FIX: avval bu tekshiruv yo'q edi — mijoz ism/telefon
+        # berib ro'yxatdan o'tgandan KEYIN yana biror savol bersa (masalan
+        # guruhda yozib, keyin shaxsiy chatga o'tib "narxi qancha" desa),
+        # AI suhbat tarixida ism/telefon hali ham borligi sabab har safar
+        # QAYTA lid JSON blokini chiqarib yuborardi — jonli holatda bitta
+        # mijoz uchun 2 emas 3 ta "YANGI LID!" xabarnomasi kelib, do'kon
+        # egasini chalg'itgan edi (foydalanuvchi aynan shu holatni
+        # ta'kidladi). Endi shu mijoz uchun so'nggi 24 soat ichida
+        # allaqachon lid mavjud bo'lsa, AI umuman chaqirilmaydi — bu ham
+        # takroriy sotuv taklifining oldini oladi, ham AI so'roviga sarf
+        # bo'ladigan xarajatni tejaydi.
+        from apps.orders.models import Lead as _LeadModel
+        from django.utils import timezone as _timezone
+        from datetime import timedelta as _timedelta
+
+        _ALREADY_LEAD_COOLDOWN_HOURS = 24
+        # ⚠️ Guruhda — faqat botga ANIQ qaratilgan (@mention/reply)
+        # xabarlarda ishlaydi, oddiy (botga qaratilmagan) gapga aralashib
+        # "operatorlarimiz bog'lanadi" deb yozib, suhbatni bezovta
+        # qilmasligi uchun. Shaxsiy chatda esa doim ishlaydi.
+        should_check_already_lead = (not is_group) or _is_message_addressed_to_bot(raw_payload, store)
+        existing_recent_lead = should_check_already_lead and _LeadModel.objects.filter(
+            store=store, customer=customer, is_deleted=False,
+            created_at__gte=_timezone.now() - _timedelta(hours=_ALREADY_LEAD_COOLDOWN_HOURS),
+        ).exists()
+        if existing_recent_lead:
+            logger.info(
+                f"[Task] Mijoz allaqachon so'nggi {_ALREADY_LEAD_COOLDOWN_HOURS} soat ichida lid "
+                f"bo'lgan — AI chaqirilmadi | store={store.name} | customer={customer.id}"
+            )
+            _send_command_reply(
+                store, customer, platform, chat_id,
+                text="🙌 Siz allaqachon ro'yxatdan o'tgansiz — operatorlarimiz tez orada siz bilan bog'lanadi!",
+                is_group_message=is_group,
+                reply_to_message_id=message_id if is_group else None,
+            )
             ChatMessage.objects.filter(id=chat_message.id).update(
                 processing_status=ChatMessage.ProcessingStatus.COMPLETED
             )

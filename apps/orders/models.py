@@ -110,16 +110,34 @@ class Lead(BaseModel):
     )
 
     # ── Tashqi CRM eksport ──────────────────────────────────────
+    # ⚠️ BUG FIX: `exported_to` bitta qiymatli maydon ("none"/"excel"/
+    # "bitrix24") — ya'ni "Excel'ga yuklab olindi" va "Bitrix24'ga
+    # yuborildi" bir-birini USTIDAN YOZIB QO'YARDI. Jonli holatda
+    # aniqlandi: ega avval "Excel'ni chatga yuborish" tugmasini bossa
+    # (bu BARCHA lidlarni `exported_to="excel"` deb belgilaydi), keyin
+    # Bitrix24 ulasa — pastdagi avtomatik "qayta urinish" vazifasi faqat
+    # `exported_to="none"` lidlarni qidirgani uchun, bu lidlar Bitrix24'ga
+    # UMUMAN yuborilmasdi, garchi haqiqatda hech qachon yuborilmagan
+    # bo'lsa ham. `exported_to`/`exported_at` ko'rsatish (TWA'da "qayerga
+    # eksport qilingan" degan umumiy ma'lumot) uchun saqlanib qolgan,
+    # lekin Bitrix24'ning haqiqiy, MUSTAQIL holati endi pastdagi
+    # `bitrix24_synced_at`da kuzatiladi (xuddi `google_sheets_synced_at`
+    # kabi) — shu ikkisi bir-biriga butunlay bog'liq emas.
     exported_to = models.CharField(
         max_length=20,
         choices=ExportStatus.choices,
         default=ExportStatus.NONE,
-        help_text="Lid qayerga eksport qilingani"
+        help_text="Lid oxirgi marta qayerga eksport qilingani (ko'rsatish uchun, retry mantig'i uchun emas)"
     )
     exported_at = models.DateTimeField(
         blank=True,
         null=True,
-        help_text="Eksport qilingan vaqt"
+        help_text="Oxirgi eksport vaqti"
+    )
+    bitrix24_synced_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Bitrix24'ga muvaffaqiyatli yuborilgan vaqt (bo'sh — hali yuborilmagan) — Excel eksportidan mustaqil"
     )
 
     # ── AI xabar bog'lanishi ───────────────────────────────────

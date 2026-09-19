@@ -17,6 +17,53 @@ import httpx
 
 logger = logging.getLogger("apps.integrations.bitrix")
 
+
+def validate_bitrix24_webhook(webhook_url: str) -> tuple[bool, str]:
+    """
+    Webhook manzilini SAQLASHDAN OLDIN haqiqatan ishlashini tekshiradi.
+
+    ⚠️ BUG FIX: avval TWA Sozlamalar'da webhook manzili hech qanday
+    tekshiruvsiz saqlanardi — "ULANGAN" belgisi shunchaki "biror matn
+    kiritilganmi" degan tekshiruv edi, "bu manzil HAQIQATAN Bitrix24'ga
+    yoza oladimi" emas. Jonli holatda ikki xil yashirin xato aniqlandi:
+    (1) noto'g'ri/eskirgan token (INVALID_CREDENTIALS), (2) webhook
+    yaratilganda "CRM" huquqi (scope) belgilanmagan (insufficient_scope)
+    — ikkalasida ham "ULANGAN" ko'rinardi, lekin lidlar jimgina hech
+    qachon yetib bormasdi. `crm.status.list` — CRM huquqi talab
+    qiladigan, lekin hech narsani o'zgartirmaydigan (xavfsiz) so'rov,
+    shu sabab ikkala xatoni ham BIR so'rovda aniqlaydi.
+
+    Returns:
+        (True, "") — webhook to'g'ri va CRM huquqiga ega
+        (False, tushunarli_xabar) — saqlashdan oldin foydalanuvchiga
+                                     ko'rsatiladigan aniq sabab
+    """
+    url = webhook_url.rstrip("/") + "/crm.status.list.json"
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.get(url)
+        data = response.json()
+    except Exception as e:
+        logger.warning(f"[Bitrix24] Webhook tekshiruvida tarmoq xatosi: {e}")
+        return False, f"Bitrix24'ga ulanib bo'lmadi — manzilni tekshiring ({e})"
+
+    error = data.get("error")
+    if not error:
+        return True, ""
+
+    if error in ("INVALID_CREDENTIALS", "invalid_token", "NO_AUTH_FOUND"):
+        return False, (
+            "Bitrix24 bu webhook manzilini tanimadi (noto'g'ri yoki eskirgan). "
+            "Bitrix24'da webhook manzilini qayta tekshiring yoki yangisini yarating."
+        )
+    if error == "insufficient_scope":
+        return False, (
+            "Bu webhookda CRM huquqi yo'q. Bitrix24'da: Ilovalar → Ishlab chiquvchi "
+            "resurslari → Boshqa → shu webhookni tahrirlab, \"CRM\" huquqini yoqing."
+        )
+    return False, f"Bitrix24 xato qaytardi: {data.get('error_description', error)}"
+
+
 # Bitrix24 CRM'dagi "Lead" obyektining entityTypeId'si (universal crm.item.* metodlari uchun)
 BITRIX_LEAD_ENTITY_TYPE_ID = 1
 
@@ -106,46 +153,6 @@ def _split_full_name(full_name: str) -> tuple[str, str]:
     return (parts[0] if parts else ""), ""
 
 
-# Suhbat tarixidan operatorga ko'rsatiladigan har bir xabar shu uzunlikdan
-# oshsa qisqartiriladi (Bitrix24 izoh maydonini haddan tashqari uzun
-# qilib yubormaslik uchun)
-_MAX_SUMMARY_MESSAGE_CHARS = 300
-_MAX_SUMMARY_MESSAGES = 12
-
-
-def _build_conversation_summary(lead) -> str:
-    """
-    Mijoz bilan AI o'rtasidagi (shaxsiy chatdagi) so'nggi suhbatni o'qishga
-    qulay ko'rinishda tuzadi — operator qo'ng'iroq qilganda mijozdan
-    HAMMA narsani qaytadan so'ramasligi uchun (foydalanuvchi buni aniq
-    ta'kidladi: "operator qaytadan hamma narsani so'ramasligi kerak").
-    """
-    from apps.chat.models import ChatMessage
-
-    messages = list(
-        ChatMessage.objects.filter(
-            store=lead.store,
-            customer=lead.customer,
-            is_group_message=False,
-            role__in=[ChatMessage.Role.USER, ChatMessage.Role.ASSISTANT],
-        )
-        .exclude(content="")
-        .order_by("-created_at")[:_MAX_SUMMARY_MESSAGES]
-    )
-    if not messages:
-        return ""
-    messages.reverse()
-
-    lines = []
-    for m in messages:
-        speaker = "Mijoz" if m.role == ChatMessage.Role.USER else "AI"
-        text = m.content.strip()
-        if len(text) > _MAX_SUMMARY_MESSAGE_CHARS:
-            text = text[:_MAX_SUMMARY_MESSAGE_CHARS] + "..."
-        lines.append(f"{speaker}: {text}")
-    return "\n".join(lines)
-
-
 def push_lead_to_bitrix24(webhook_url: str, lead) -> bool:
     """
     Bitta lidni Bitrix24'ga Lead (CRM obyekti) sifatida yuboradi.
@@ -176,23 +183,19 @@ def push_lead_to_bitrix24(webhook_url: str, lead) -> bool:
     # foydalanuvchi buni "eng muhim narsa pastda qolib ketyapti" deb
     # to'g'ri ta'kidladi. Endi eng muhim (qaysi kursga yozilgani) birinchi
     # qatorda, texnik ma'lumotlar (lid raqami, manba) keyin turadi.
+    #
+    # ⚠️ BUG FIX 2: avval bu yerga qo'shimcha ravishda xom "Mijoz: .../
+    # AI: ..." suhbat tarixi ham to'liq qo'shilardi — foydalanuvchi buni
+    # keraksiz deb, o'rniga `lead.notes`ning o'zi (endi 2-4 gapli, batafsil
+    # yozilgan — apps/chat/ai_service.py, _LEAD_QUALIFICATION_RULE'ga
+    # qarang) operator uchun yetarli ekanini ta'kidladi. Xom tarixni
+    # qayta o'qishga operator vaqti yo'q, tayyor xulosa kerak.
     comment_lines = []
     if lead.notes:
         comment_lines.append(f"Nima uchun yozildi: {lead.notes}")
     comment_lines.append(
         f"Lid raqami: {lead.lead_number} | Holat: {lead.get_lead_status_display()} | Manba: LeadNode bot"
     )
-    # ⚠️ Operator mijozga qo'ng'iroq qilganda HAMMA narsani qaytadan
-    # so'ramasligi uchun — mijoz bilan AI o'rtasidagi so'nggi suhbat
-    # to'liq shu yerga qo'shiladi (foydalanuvchi aniq shu muammoni
-    # ta'kidladi: "unaqa boladigon bolsa loyihamni educationlarg nima
-    # keragi bor" — ya'ni bu loyihaning ASOSIY qiymati, ixtiyoriy qo'shimcha
-    # emas).
-    conversation_summary = _build_conversation_summary(lead)
-    if conversation_summary:
-        comment_lines.append("")
-        comment_lines.append("--- Suhbat tarixi (operator uchun, qayta so'ramaslik uchun) ---")
-        comment_lines.append(conversation_summary)
     comments = "\n".join(comment_lines)
 
     # ⚠️ BUG FIX: Bitrix24 portali "title"ni avtomatik "Lead #N" bilan

@@ -91,8 +91,9 @@ class Command(BaseCommand):
                 # loyiha endi faqat education/services, "buyurtma" emas
                 # "lid" tushunchasi ishlatiladi.
                 description = (
-                    "🤖 LeadNode — do'koningiz uchun sun'iy intellektli yordamchi.\n\n"
-                    "✨ 24/7 mijozlarga javob beradi va qiziqqan mijozlarni tezkor saralab beradi!\n\n"
+                    "🤖 LeadNode — mijozlarga 24/7 javob berib, ularni saralab (qualification) "
+                    "va ro'yxatdan o'tkazishgacha olib boradigan AI administrator.\n\n"
+                    "✨ Savolingizga darhol, aniq javob beradi!\n\n"
                     "Boshlash uchun sizga yuborilgan shaxsiy havola orqali kiring 👇"
                 )
                 short_desc = "24/7 ishlaydigon AI yordamchi"

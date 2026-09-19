@@ -83,6 +83,20 @@ class Customer(BaseModel):
         default=False,
         help_text="Mijoz bloklanganmi? True bo'lsa bot va operator xabarlari to'xtatiladi"
     )
+    # ⚠️ BUG FIX: avval "o'qildi" holati faqat FRONTEND xotirasida
+    # (bir dumaloq JS Map, `readChatsRef`) saqlanardi — sahifa yopilib
+    # qayta ochilganda (yoki reload qilinganda) bu xotira butunlay
+    # yo'qolib, unread_count backend'dagi eski qiymatga qaytib ketardi
+    # (jonli holatda aniqlandi: Inbox'da o'qib chiqilgan xabar reload
+    # qilingandan keyin yana "o'qilmagan" bo'lib qolib ketardi). Endi
+    # operator qachon o'qiganini BAZADA saqlaymiz — ChatThreadListView
+    # unread_count'ni shu vaqtdan keyingi mijoz xabarlari soni sifatida
+    # hisoblaydi (AI javobidan keyin ham, operator o'qishidan keyin ham).
+    operator_last_read_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Operator ushbu mijoz bilan suhbatni oxirgi marta ochib o'qigan vaqti"
+    )
 
     class Meta:
         verbose_name = "Mijoz"

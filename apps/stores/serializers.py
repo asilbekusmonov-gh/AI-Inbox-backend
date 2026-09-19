@@ -120,6 +120,23 @@ class StoreConfigUpdateSerializer(serializers.ModelSerializer):
             "google_sheets_webhook_url": {"write_only": True},
         }
 
+    def validate_bitrix24_webhook_url(self, value):
+        """
+        ⚠️ BUG FIX: avval bu maydon hech qanday tekshiruvsiz saqlanardi —
+        noto'g'ri yoki CRM huquqisiz webhook ham "ULANGAN" deb ko'rsatilib,
+        lidlar jimgina hech qachon Bitrix24'ga yetib bormasdi (jonli
+        holatda aniqlandi). Endi saqlashdan OLDIN haqiqiy so'rov bilan
+        tekshiriladi — noto'g'ri bo'lsa, aniq sabab bilan rad etiladi.
+        """
+        value = (value or "").strip()
+        if not value:
+            return value
+        from apps.integrations.bitrix import validate_bitrix24_webhook
+        is_valid, error_message = validate_bitrix24_webhook(value)
+        if not is_valid:
+            raise serializers.ValidationError(error_message)
+        return value
+
 
 # ── METADATA VALIDATORLAR ────────────────────────────────────
 

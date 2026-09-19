@@ -295,13 +295,17 @@ class TelegramWebhookView(View):
             Store.objects.filter(id=store.id).update(tg_group_chat_id=chat_id)
 
         logger.info(f"Telegram: guruh bog'landi | store={store.name} | chat_id={chat_id}")
-        bot_mention = f"@{store.tg_bot_username}" if store.tg_bot_username else "botni"
+        # ⚠️ Avval bu yerda botning xom @username'i ("@LeadNodeBot")
+        # ko'rsatilardi — bu bir nechta do'konga xizmat qiladigan UMUMIY
+        # botning ichki texnik nomini ochib qo'yardi (do'kon egasi buni
+        # o'z-o'ziga tegishli, "oq nishonli" yechim sifatida ko'rsatishni
+        # xohlaydi). Endi shunchaki umumiy "botni" so'zi ishlatiladi.
         send_telegram_message(
             bot_token=bot_token,
             chat_id=chat_id,
             text=(
-                f"✅ Ushbu guruh <b>{store.name}</b> do'koniga muvaffaqiyatli ulandi!\n\n"
-                f"Endi a'zolar {bot_mention} belgilab yoki botning xabariga javob (reply) berib "
+                f"✅ <b>LeadNode</b> ushbu guruhga muvaffaqiyatli ulandi — endi <b>{store.name}</b> uchun ishlaydi!\n\n"
+                f"A'zolar botni belgilab yoki xabariga javob (reply) berib "
                 f"savol bersa, AI sotuvchi shu yerda javob beradi."
             ),
             parse_mode="HTML",

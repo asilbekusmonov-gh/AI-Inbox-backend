@@ -209,6 +209,28 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
         except Customer.DoesNotExist:
             return Response({"error": "Mijoz topilmadi"}, status=status.HTTP_404_NOT_FOUND)
 
+    @action(detail=True, methods=["patch"], url_path="mark-read")
+    def mark_read(self, request, pk=None):
+        """
+        Operator ushbu mijoz bilan suhbatni o'qidi deb belgilaydi:
+        PATCH /api/v1/chat/<customer_id>/mark-read/
+
+        ⚠️ Avval bu holat faqat frontend xotirasida saqlanardi va sahifa
+        reload qilinganda yo'qolib, unread_count yana eski (noto'g'ri)
+        qiymatga qaytib ketardi (jonli holatda aniqlandi). Endi bu yerda
+        bazaga yoziladi — ChatThreadListView shu vaqtdan foydalanadi.
+        """
+        from django.utils import timezone
+        target_store = self._get_target_store()
+        from apps.customers.models import Customer
+        try:
+            customer = Customer.objects.get(pk=pk, store=target_store)
+            customer.operator_last_read_at = timezone.now()
+            customer.save(update_fields=["operator_last_read_at", "updated_at"])
+            return Response({"success": True}, status=status.HTTP_200_OK)
+        except Customer.DoesNotExist:
+            return Response({"error": "Mijoz topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
     @action(detail=True, methods=["delete"], url_path="delete-thread")
     def delete_thread(self, request, pk=None):
         """Mijoz bilan barcha chat tarixini o'chirish: DELETE /api/v1/chat/<customer_id>/delete-thread/"""
@@ -478,9 +500,18 @@ class ChatThreadListView(APIView):
             threads_map[cid]["last_message_time"] = time_str
             threads_map[cid]["_last_datetime"] = msg.created_at
 
-            # Count unread: customer messages that came after the last assistant message
+            # Count unread: customer messages that came after the last assistant
+            # message AND after the operator's last "read" timestamp (whichever
+            # is later) — ⚠️ BUG FIX: avval faqat "oxirgi AI javobidan keyingi"
+            # mezoni bor edi, operator o'zi suhbatni ochib o'qigani hisobga
+            # olinmasdi (bu faqat frontend xotirasida — reload'da yo'qolardi).
             if msg.role == ChatMessage.Role.USER:
-                threads_map[cid]["unread_count"] += 1
+                already_read = (
+                    cust.operator_last_read_at is not None
+                    and msg.created_at <= cust.operator_last_read_at
+                )
+                if not already_read:
+                    threads_map[cid]["unread_count"] += 1
             elif msg.role == ChatMessage.Role.ASSISTANT:
                 threads_map[cid]["unread_count"] = 0
 

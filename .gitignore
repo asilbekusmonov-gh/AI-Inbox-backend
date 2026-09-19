@@ -54,3 +54,8 @@ htmlcov/
 # uv
 .uv/
 uv.lock
+
+# Database backups — HAQIQIY mijoz ma'lumotlarini (ism, telefon) o'z
+# ichiga oladi, hech qachon git'ga tushmasligi kerak.
+backups/*.sql.gz
+backups/backup.log
