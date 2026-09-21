@@ -194,6 +194,11 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 60 * 30,  # Har 30 daqiqada bir marta
         "options": {"queue": "maintenance"},
     },
+    "send-followup-messages": {
+        "task": "apps.customers.tasks.send_followup_messages",
+        "schedule": 60 * 15,  # Har 15 daqiqada bir marta
+        "options": {"queue": "maintenance"},
+    },
 }
 
 

@@ -167,6 +167,15 @@ class ChatMessage(BaseModel):
         null=True,
         help_text="Javob bergan AI modeli nomi"
     )
+    latency_ms = models.IntegerField(
+        blank=True,
+        null=True,
+        help_text=(
+            "Mijoz xabari qabul qilingandan (webhook) AI javobi tayyor "
+            "bo'lgunga qadar o'tgan vaqt (millisekund) — faqat AI javob "
+            "xabarlarida to'ldiriladi"
+        )
+    )
 
     class Meta:
         verbose_name = "Chat xabari"

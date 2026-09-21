@@ -16,13 +16,82 @@ SaaS qoidalari:
 - Har bir do'kon alohida Celery queue'da
 """
 import logging
+import re
+from typing import Optional
 from celery import shared_task
-from celery.exceptions import MaxRetriesExceededError, SoftTimeLimitExceeded
+from celery.exceptions import MaxRetriesExceededError, Retry, SoftTimeLimitExceeded
 from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError
 
 logger = logging.getLogger("apps.webhooks")
+
+# ⚠️ Guruh spam/reklama tozalash (foydalanuvchi so'ragan funksiya):
+# faqat ANIQ, ob'ektiv signallar tekshiriladi — xato pozitiv (haqiqiy
+# mijoz savolini spam deb o'chirib yuborish) narxi juda yuqori, shuning
+# uchun "balki reklamadir" darajasidagi noaniq belgilar ATAYLAB
+# ishlatilmaydi.
+_TELEGRAM_LINK_RE = re.compile(r"(?:https?://)?t\.me/([A-Za-z0-9_+]+)", re.IGNORECASE)
+_GENERIC_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+_SPAM_KEYWORDS = (
+    # Pul ishlash / moliyaviy firibgarlik reklamalari — o'quv markazi
+    # guruhida bunday xabar HECH QACHON haqiqiy mijoz savoli bo'lmaydi.
+    "kuniga $", "kuniga pul", "onlayn pul ishlash", "uyda ishlash",
+    "заработок", "работа на дому", "пассивный доход", "инвестици",
+    "криптовалют", "crypto signal", "forex signal",
+    "kanalga a'zo bo'ling", "kanalimizga obuna", "obuna bo'ling",
+    "подпишись", "подписывайся", "вступай в группу",
+)
+
+
+def _detect_group_spam(text: str, raw_payload: dict, store) -> Optional[str]:
+    """
+    Guruhdagi xabar reklama/spam ekanligini aniqlaydi. Topilsa qisqa
+    sababni (log uchun) qaytaradi, aks holda None — "spam emas" deb
+    hisoblanadi (aniq bo'lmasa HAR DOIM shu holatga qaytiladi).
+    """
+    text = text or ""
+    lowered = text.lower()
+
+    # 1) O'zga Telegram kanal/guruhga havola — eng ishonchli signal.
+    #    Botning o'z username'iga (yoki shu do'konning bog'langan
+    #    guruhiga taalluqli bo'lmagan) havolalar shubhali hisoblanadi.
+    own_bot_username = (getattr(store, "tg_bot_username", "") or "").lstrip("@").lower()
+    for match in _TELEGRAM_LINK_RE.finditer(text):
+        linked = match.group(1).lower()
+        if own_bot_username and linked == own_bot_username:
+            continue
+        if linked in ("joinchat", "share", "addstickers"):
+            # Bularning o'zi kanal nomi emas, Telegram'ning ichki yo'llari —
+            # baribir begona guruhga taklif bo'lgani uchun spam hisoblanadi,
+            # lekin alohida ajratib ko'rsatish uchun qoldirildi.
+            return "Telegram taklif havolasi"
+        return f"boshqa Telegram kanaliga havola (t.me/{linked})"
+
+    # 2) Bir nechta tashqi (t.me bo'lmagan) havola — ommaviy reklama xabarlarida keng tarqalgan.
+    generic_urls = [u for u in _GENERIC_URL_RE.findall(text) if "t.me/" not in u.lower()]
+    if len(generic_urls) >= 2:
+        return "bir nechta tashqi havola"
+
+    # 3) Kanaldan forward qilingan xabar — odatda begona reklama kanalidan keladi.
+    inner = (raw_payload.get("message", {}) or {}) if isinstance(raw_payload, dict) else {}
+    forward_chat = inner.get("forward_from_chat") or {}
+    if forward_chat.get("type") == "channel":
+        return "kanaldan forward qilingan xabar"
+
+    # 4) Aniq spam kalit so'zlari.
+    for kw in _SPAM_KEYWORDS:
+        if kw in lowered:
+            return f"spam kalit so'z: '{kw}'"
+
+    return None
+
+# Requirement 9 (latency monitoring): xabar qabul qilingandan javob
+# tayyor bo'lgunga qadar shuncha millisekunddan ko'p vaqt ketsa,
+# alohida WARNING log yoziladi — mijoz "10-20 soniya kutib qolishi"
+# kabi holatlarni docker log'lardan ham darhol ko'rish mumkin bo'lishi
+# uchun (alohida monitoring stek qo'shmasdan).
+_SLOW_RESPONSE_THRESHOLD_MS = 15000
 
 
 def _is_message_addressed_to_bot(raw_payload: dict, store) -> bool:
@@ -50,6 +119,23 @@ def _is_message_addressed_to_bot(raw_payload: dict, store) -> bool:
         return True
 
     return False
+
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html_tags(text: str) -> str:
+    """
+    Telegram'ga `parse_mode="HTML"` bilan yuboriladigan statik xabarlar
+    (masalan `/start`, `/help`) ichida `<b>...</b>` kabi teglar bo'ladi —
+    bular Telegram'ning o'zida chiroyli qalin matn sifatida ko'rinadi.
+    ⚠️ BUG FIX: bu AYNAN SHU (teglar bilan) matn ChatMessage.content'ga
+    ham saqlanardi — TWA Inbox esa xavfsizlik uchun HTML'ni ATAYLAB
+    render qilmay, oddiy matn sifatida ko'rsatadi, natijada operator
+    xom "<b>...</b>" belgilarini ko'rardi (jonli holatda aniqlandi).
+    Bazaga faqat operator o'qiydigan TOZA matn saqlanadi.
+    """
+    return _HTML_TAG_RE.sub("", text)
 
 
 def _send_command_reply(store, customer, platform, chat_id, text, parse_mode="HTML", reply_markup=None, is_group_message=False, reply_to_message_id=None):
@@ -80,6 +166,7 @@ def _send_command_reply(store, customer, platform, chat_id, text, parse_mode="HT
         reply_to_message_id=reply_to_message_id,
     )
     if sent and customer is not None:
+        stored_content = _strip_html_tags(text) if parse_mode == "HTML" else text
         ChatMessage.objects.create(
             store=store,
             customer=customer,
@@ -88,7 +175,7 @@ def _send_command_reply(store, customer, platform, chat_id, text, parse_mode="HT
             chat_id=str(chat_id),
             platform=platform,
             role=ChatMessage.Role.ASSISTANT,
-            content=text,
+            content=stored_content,
             processing_status=ChatMessage.ProcessingStatus.COMPLETED,
             is_group_message=is_group_message,
         )
@@ -117,6 +204,7 @@ def process_incoming_message(
     raw_payload: dict,
     sender_display_name: str = "",
     chat_type: str = "private",
+    received_at: str = "",
 ):
     """
     Webhook'dan qabul qilingan xabarni qayta ishlaydi.
@@ -132,6 +220,18 @@ def process_incoming_message(
     from apps.chat.ai_service import get_ai_response
     from apps.chat.senders import send_reply
     from apps.chat.lead_service import create_lead_from_ai_data, notify_store_owner, sync_lead_to_bitrix24, sync_lead_to_google_sheets
+    from django.utils import timezone as _tz
+    from django.utils.dateparse import parse_datetime
+
+    # ⚠️ Latency monitoring (Requirement 9): mijoz xabar yuborgan
+    # ONDAN buyon o'tgan vaqtni o'lchash uchun — webhook view'da
+    # navbatga qo'yishdan OLDIN belgilangan `received_at` bor bo'lsa
+    # o'sha ANIQROQ (navbatda kutgan vaqtni ham qamrab oladi), bo'lmasa
+    # (masalan eski testlar/qayta ishga tushirishlar) shu taskning o'zi
+    # boshlangan vaqtiga tushamiz — ikkalasi ham yo'q bo'lib qolmaydi.
+    _latency_anchor = parse_datetime(received_at) if received_at else None
+    if _latency_anchor is None:
+        _latency_anchor = _tz.now()
 
     logger.info(
         f"[Task] Boshlandi | store={store_id[:8]} | "
@@ -204,6 +304,59 @@ def process_incoming_message(
                 f"[Task] Dublikat xabar, skip: msg_id={message_id}"
             )
             return
+
+        # ── 3.5. Guruhda reklama/spam xabarni tozalash (ixtiyoriy) ─────
+        # ⚠️ Do'kon egasi/xodim xabari HECH QACHON o'chirilmaydi — ular
+        # o'z guruhida erkin gaplasha olishi kerak. Opt-in (standart
+        # o'chirilgan): bot guruhda ADMIN bo'lmasa, o'chirish baribir
+        # ishlamaydi, shuning uchun ega buni TWA'dan ANIQ yoqishi kerak.
+        if is_group and getattr(store, "group_spam_cleanup_enabled", False):
+            is_owner_early = bool(store.tg_owner_chat_id) and str(store.tg_owner_chat_id) == str(sender_id)
+            is_staff_early = False
+            if not is_owner_early and sender_username:
+                from apps.stores.models import StoreStaffMember as _StoreStaffMemberEarly
+                is_staff_early = _StoreStaffMemberEarly.objects.filter(
+                    store=store, tg_username__iexact=sender_username
+                ).exists()
+
+            if not is_owner_early and not is_staff_early:
+                spam_reason = _detect_group_spam(text, raw_payload, store)
+                if spam_reason:
+                    from apps.chat.senders import delete_telegram_message
+                    deleted = delete_telegram_message(store.tg_bot_token, chat_id, int(message_id))
+                    if deleted:
+                        logger.info(
+                            f"[Spam Filter] Xabar o'chirildi ({spam_reason}) | "
+                            f"store={store.name} | chat_id={chat_id} | msg_id={message_id}"
+                        )
+                    else:
+                        # ⚠️ Eng ehtimoliy sabab: bot guruhda admin emas
+                        # (yoki "Xabarlarni o'chirish" huquqi berilmagan).
+                        # Egaga BIR MARTA (24 soatda) shu haqda eslatib
+                        # qo'yamiz — aks holda funksiya "yoqilgan" deb
+                        # o'ylab, aslida hech narsa o'chirilmayotganini
+                        # sezmay qolishi mumkin edi.
+                        logger.warning(
+                            f"[Spam Filter] Xabarni o'chirib bo'lmadi (huquq yo'qmi?) | "
+                            f"store={store.name} | chat_id={chat_id} | msg_id={message_id}"
+                        )
+                        alert_key = f"spam_cleanup_permission_alert:{store.id}"
+                        if store.tg_owner_chat_id and cache.add(alert_key, True, timeout=60 * 60 * 24):
+                            from apps.chat.senders import send_telegram_message
+                            send_telegram_message(
+                                bot_token=store.tg_bot_token,
+                                chat_id=store.tg_owner_chat_id,
+                                text=(
+                                    "⚠️ <b>Guruhda spam/reklama tozalash yoqilgan, lekin bot uni o'chira olmadi!</b>\n\n"
+                                    "Botni guruhda <b>Admin</b> qilib, unga <b>\"Xabarlarni o'chirish\"</b> "
+                                    "huquqini berishingiz kerak — aks holda bu funksiya ishlamaydi."
+                                ),
+                                parse_mode="HTML",
+                            )
+                    ChatMessage.objects.filter(id=chat_message.id).update(
+                        processing_status=ChatMessage.ProcessingStatus.SKIPPED
+                    )
+                    return
 
         # ── 4. Admin (Do'kon Egasi) vs Mijozni tekshirish va ajratish ──────
         is_admin = False
@@ -622,234 +775,275 @@ def process_incoming_message(
             )
             return
 
-        # ── 5. Gemini AI'ga jo'natish ──────────────────────────────────
-        logger.info(
-            f"[Task] AI chaqirilmoqda | store={store.name} | "
-            f"model={store.ai_model}"
-        )
-
-        ai_response = get_ai_response(
-            store=store,
-            customer=customer,
-            user_message=text,
-            is_group=is_group,
-        )
-
-        logger.info(
-            f"[Task] AI javob olindi | "
-            f"tokens={ai_response.tokens_used} | "
-            f"has_lead={ai_response.has_lead}"
-        )
-
-        # ── 5.2. AI umuman javob berolmagan holat (masalan Gemini kvotasi
-        # tugagan) — mijozga "texnik muammo" xabarini HECH KIMGA (ayniqsa
-        # guruhda — bir nechta odam ko'radi) yubormaymiz. Buning o'rniga
-        # xabarni "FAILED" deb belgilab (TWA Inbox'da ko'rinib, qo'lda
-        # javob berish mumkin bo'lishi uchun), do'kon egasiga BIR MARTA
-        # (soatiga bir marta cooldown bilan — takror-takror bezovta
-        # qilmaslik uchun) ogohlantirish yuboramiz.
-        # ⚠️ GEMINI_API_KEY barcha do'konlar uchun UMUMIY (Single Master
-        # Bot bilan bir xil model) — demak bitta do'kon uchun kvota
-        # tugashi ODATDA hammasiga birdan ta'sir qiladi.
-        if ai_response.is_error:
-            logger.warning(
-                f"[Task] AI xato holatida — mijozga javob yuborilmadi | "
-                f"store={store.name} | error_type={ai_response.error_type}"
-            )
-            error_reason = ai_response.error_type or "nomalum xato"
-            ChatMessage.objects.filter(id=chat_message.id).update(
-                processing_status=ChatMessage.ProcessingStatus.FAILED,
-                error_message=f"AI javob berolmadi ({error_reason})",
-            )
-            if store.tg_owner_chat_id and store.tg_bot_token:
-                cooldown_key = f"ai_error_alert_sent:{store.id}:{ai_response.error_type}"
-                if cache.add(cooldown_key, True, timeout=60 * 60):
-                    from apps.chat.senders import send_telegram_message as _send_owner_alert
-                    if ai_response.error_type == "quota":
-                        owner_text = (
-                            "🚨 <b>AI TO'XTAB QOLDI — kunlik so'rov limiti tugadi!</b>\n\n"
-                            "Gemini AI'ning bepul kunlik limiti tugagani sabab, bot hozir "
-                            "mijozlarga AVTOMATIK javob berolmayapti. Mijozlarning xabarlari "
-                            "TWA Inbox'da saqlanmoqda — hozircha qo'lda javob bering.\n\n"
-                            "Doimiy hal qilish uchun: Google AI Studio'da pulli rejaga o'ting."
-                        )
-                    else:
-                        owner_text = (
-                            "🚨 <b>AI vaqtincha javob berolmayapti (texnik xato)!</b>\n\n"
-                            "Mijozlarning xabarlari TWA Inbox'da saqlanmoqda — hozircha "
-                            "qo'lda javob bering. Muammo davom etsa, birozdan so'ng qayta tekshiring."
-                        )
-                    _send_owner_alert(
-                        bot_token=store.tg_bot_token,
-                        chat_id=store.tg_owner_chat_id,
-                        text=owner_text,
-                        parse_mode="HTML",
-                    )
-            return
-
-        # ── 5.3. Guruhda AI ataylab "javob yozish shart emas" deb tanladi
-        # (mijoz shunchaki reaksiya/izoh yozgan, haqiqiy savol emas) —
-        # hech narsa yubormasdan, xabarni COMPLETED deb belgilab chiqamiz.
-        if ai_response.is_silent:
+        # ── 4.9. Bir xil mijozning suhbatini ikkita worker BIR VAQTDA
+        # qayta ishlamasligi uchun qulf (lock) ──────────────────────────
+        # ⚠️ Mijoz ketma-ket bir necha xabar yuborsa ("Salom", "IELTS
+        # kerak", "Narxi qancha?"), HAR BIRI alohida Celery vazifasi
+        # bo'lib navbatga tushadi. Ikkita worker shu MIJOZNING xabarlarini
+        # BIR VAQTDA qayta ishlasa, ikkalasi ham bir xil (eski) suhbat
+        # tarixini o'qib, bir-biridan bexabar AI'ga alohida so'rov
+        # yuborishi mumkin edi — natijada AI eng so'nggi xabarni
+        # "ko'rmasligi" yoki ikkita mos kelmaydigan javob berilishi xavfi
+        # bor edi. Turli mijozlar BEMALOL parallel ishlayveradi (bu qulf
+        # faqat SHU mijoz uchun) — faqat bitta mijozning ketma-ket
+        # xabarlari xavfsiz, birin-ketin qayta ishlanadi.
+        _CONV_LOCK_TIMEOUT = 60  # soniya — worker qulflab o'lib qolsa ham abadiy tiqilib qolmasin
+        _CONV_LOCK_RETRY_DELAY = 3
+        conv_lock_key = f"conv_lock:{store.id}:{customer.id}"
+        if not cache.add(conv_lock_key, self.request.id, timeout=_CONV_LOCK_TIMEOUT):
             logger.info(
-                f"[Task] AI reaksiyaga javob yozmaslikni tanladi (NO_REPLY) | "
-                f"store={store.name} | msg_id={message_id}"
+                f"[Task] Mijozning suhbati band (boshqa xabar qayta ishlanmoqda) — "
+                f"{_CONV_LOCK_RETRY_DELAY}s dan keyin qayta urinamiz | customer={customer.id}"
             )
-            ChatMessage.objects.filter(id=chat_message.id).update(
-                processing_status=ChatMessage.ProcessingStatus.COMPLETED
-            )
-            return
+            raise self.retry(countdown=_CONV_LOCK_RETRY_DELAY)
 
-        # ── 5.5. AI javobini DB'ga saqlash ─────────────────────────────
-        #
-        # ⚠️ BUG FIX (poyga holati / race condition): avval bu yerda oddiy
-        # `.create()` ishlatilardi. Telegram bir xil update'ni ba'zan qayta
-        # yuborishi (yoki Celery'ning `acks_late=True` sozlamasi worker
-        # o'lib qolganda taskni qayta ishga tushirishi) natijasida IKKI
-        # worker BIR XIL xabarni parallel qayta ishlashi mumkin edi.
-        # `message_id=f"ai_resp_{message_id}"` — har doim bir xil, statik
-        # qiymat bo'lgani uchun, ikkinchi (yutqazgan) worker bazadagi
-        # unique cheklovga (store, message_id, platform) urilib
-        # `IntegrityError` bilan qulardi — bu esa uni 3 marta qayta urinib
-        # ko'rishga (har birida qimmat Gemini so'rovi bilan!) va oxir-
-        # oqibat ALLAQACHON MUVAFFAQIYATLI yakunlangan xabarni FAILED deb
-        # belgilab qo'yishga olib kelardi. Endi `get_or_create` — ikkinchi
-        # worker jimgina "allaqachon bor" deb bilib, hech narsa qilmay
-        # to'xtaydi.
-        ai_message, ai_message_created = ChatMessage.objects.get_or_create(
-            store=store,
-            customer=customer,
-            message_id=f"ai_resp_{message_id}",
-            platform=platform,
-            bot_token=store.tg_bot_token,
-            chat_id=str(chat_id),
-            defaults={
-                "role": ChatMessage.Role.ASSISTANT,
-                "content": ai_response.text,
-                "processing_status": ChatMessage.ProcessingStatus.COMPLETED,
-                "celery_task_id": self.request.id,
-                "tokens_used": ai_response.tokens_used,
-                "ai_model_used": ai_response.model_used,
-                "is_group_message": is_group,
-            },
-        )
-
-        if not ai_message_created:
-            # Boshqa worker bu xabarga ALLAQACHON muvaffaqiyatli javob
-            # bergan (poyga holati) — takroriy javob yubormaymiz, takroriy
-            # buyurtma yaratmaymiz, faqat asl xabarni COMPLETED deb
-            # belgilab, jimgina to'xtaymiz.
+        try:
+            # ── 5. Gemini AI'ga jo'natish ──────────────────────────────────
             logger.info(
-                f"[Task] AI javobi allaqachon mavjud (poyga holati/retry) — "
-                f"qayta ishlanmadi | msg_id={message_id}"
+                f"[Task] AI chaqirilmoqda | store={store.name} | "
+                f"model={store.ai_model}"
             )
-            ChatMessage.objects.filter(id=chat_message.id).update(
-                processing_status=ChatMessage.ProcessingStatus.COMPLETED,
-            )
-            return
 
-        # ── 5.6. Guruhda: AI javob tayyorlanayotgan bir necha soniya
-        # ichida inson (do'kon egasi/xodim) ALLAQACHON shu mijozga qo'lda
-        # javob yozib ulgurgan bo'lsa — AI javobini ENDI yubormaymiz.
-        # ⚠️ Mention/reply talabini olib tashlaganimiz uchun (mijoz
-        # botni belgilamasa ham javob olishi uchun), bot admin bilan
-        # "ustma-ust tushib qolish" xavfi qaytadi — buni shu tekshiruv
-        # bilan qoplaymiz: ega/xodim mijozning xabaridan KEYIN o'sha
-        # guruhga (istalgan) xabar yozgan bo'lsa, demak allaqachon
-        # o'zi javob berayapti — bot ikkinchi, ehtimol qarama-qarshi
-        # javob bilan aralashmasin.
-        if is_group:
-            human_ids = set()
-            if store.tg_owner_chat_id:
-                human_ids.add(str(store.tg_owner_chat_id))
-            from apps.stores.models import StoreStaffMember as _StoreStaffMember
-            from apps.customers.models import Customer as _Customer
-            staff_usernames = list(
-                _StoreStaffMember.objects.filter(store=store).values_list("tg_username", flat=True)
+            ai_response = get_ai_response(
+                store=store,
+                customer=customer,
+                user_message=text,
+                is_group=is_group,
             )
-            if staff_usernames:
-                human_ids.update(
-                    str(pid) for pid in _Customer.objects.filter(
-                        store=store, username__in=staff_usernames
-                    ).values_list("platform_user_id", flat=True)
+
+            logger.info(
+                f"[Task] AI javob olindi | "
+                f"tokens={ai_response.tokens_used} | "
+                f"has_lead={ai_response.has_lead}"
+            )
+
+            # ── 5.2. AI umuman javob berolmagan holat (masalan Gemini kvotasi
+            # tugagan) — mijozga "texnik muammo" xabarini HECH KIMGA (ayniqsa
+            # guruhda — bir nechta odam ko'radi) yubormaymiz. Buning o'rniga
+            # xabarni "FAILED" deb belgilab (TWA Inbox'da ko'rinib, qo'lda
+            # javob berish mumkin bo'lishi uchun), do'kon egasiga BIR MARTA
+            # (soatiga bir marta cooldown bilan — takror-takror bezovta
+            # qilmaslik uchun) ogohlantirish yuboramiz.
+            # ⚠️ GEMINI_API_KEY barcha do'konlar uchun UMUMIY (Single Master
+            # Bot bilan bir xil model) — demak bitta do'kon uchun kvota
+            # tugashi ODATDA hammasiga birdan ta'sir qiladi.
+            if ai_response.is_error:
+                logger.warning(
+                    f"[Task] AI xato holatida — mijozga javob yuborilmadi | "
+                    f"store={store.name} | error_type={ai_response.error_type}"
                 )
-            if human_ids and ChatMessage.objects.filter(
-                store=store, chat_id=str(chat_id), is_group_message=True,
-                customer__platform_user_id__in=human_ids,
-                created_at__gt=chat_message.created_at,
-            ).exists():
+                error_reason = ai_response.error_type or "nomalum xato"
+                ChatMessage.objects.filter(id=chat_message.id).update(
+                    processing_status=ChatMessage.ProcessingStatus.FAILED,
+                    error_message=f"AI javob berolmadi ({error_reason})",
+                )
+                if store.tg_owner_chat_id and store.tg_bot_token:
+                    cooldown_key = f"ai_error_alert_sent:{store.id}:{ai_response.error_type}"
+                    if cache.add(cooldown_key, True, timeout=60 * 60):
+                        from apps.chat.senders import send_telegram_message as _send_owner_alert
+                        if ai_response.error_type == "quota":
+                            owner_text = (
+                                "🚨 <b>AI TO'XTAB QOLDI — kunlik so'rov limiti tugadi!</b>\n\n"
+                                "Gemini AI'ning bepul kunlik limiti tugagani sabab, bot hozir "
+                                "mijozlarga AVTOMATIK javob berolmayapti. Mijozlarning xabarlari "
+                                "TWA Inbox'da saqlanmoqda — hozircha qo'lda javob bering.\n\n"
+                                "Doimiy hal qilish uchun: Google AI Studio'da pulli rejaga o'ting."
+                            )
+                        else:
+                            owner_text = (
+                                "🚨 <b>AI vaqtincha javob berolmayapti (texnik xato)!</b>\n\n"
+                                "Mijozlarning xabarlari TWA Inbox'da saqlanmoqda — hozircha "
+                                "qo'lda javob bering. Muammo davom etsa, birozdan so'ng qayta tekshiring."
+                            )
+                        _send_owner_alert(
+                            bot_token=store.tg_bot_token,
+                            chat_id=store.tg_owner_chat_id,
+                            text=owner_text,
+                            parse_mode="HTML",
+                        )
+                return
+
+            # ── 5.3. Guruhda AI ataylab "javob yozish shart emas" deb tanladi
+            # (mijoz shunchaki reaksiya/izoh yozgan, haqiqiy savol emas) —
+            # hech narsa yubormasdan, xabarni COMPLETED deb belgilab chiqamiz.
+            if ai_response.is_silent:
                 logger.info(
-                    f"[Task] Guruhda ega/xodim allaqachon javob bergan — AI javobi yuborilmadi | store={store.name}"
+                    f"[Task] AI reaksiyaga javob yozmaslikni tanladi (NO_REPLY) | "
+                    f"store={store.name} | msg_id={message_id}"
+                )
+                ChatMessage.objects.filter(id=chat_message.id).update(
+                    processing_status=ChatMessage.ProcessingStatus.COMPLETED
                 )
                 return
 
-        # ── 6. Javobni platforma orqali yuborish ──────────────────────
-        # ⚠️ Guruhda bir nechta odam yozib turishi mumkin — javobni oddiy
-        # xabar sifatida yuborsak, kim so'ragani va botning kimga javob
-        # berayotgani chalkashib qolardi. Shaxsiy chatda esa reply shart
-        # emas (faqat 1 kishi bilan suhbat).
-        sent = send_reply(
-            store=store,
-            platform=platform,
-            chat_id=chat_id,
-            text=ai_response.text,
-            customer=customer,
-            reply_to_message_id=message_id if is_group else None,
-        )
-
-        if not sent:
-            logger.warning(
-                f"[Task] Javob yuborilmadi! "
-                f"platform={platform} | chat_id={chat_id}"
-            )
-            # Yuborilmagan bo'lsa ham davom etamiz (buyurtma saqlash kerak)
-
-        # ── 7. Lid aniqlangan bo'lsa ──────────────────────────────────
-        if ai_response.has_lead and ai_response.lead_data:
-            logger.info(
-                f"[Task] Lid aniqlandi! "
-                f"mijoz={ai_response.lead_data.get('full_name')} | "
-                f"lead_status={ai_response.lead_data.get('lead_status')}"
-            )
-
-            lead = create_lead_from_ai_data(
-                store=store,
-                customer=customer,
-                lead_data=ai_response.lead_data,
-                platform=platform,
-                source="group" if is_group else "private_chat",
-                source_message=ai_message,
-            )
-
-            if lead:
-                # Egasiga Telegram xabarnomasi
-                notify_store_owner(store=store, lead=lead)
-                # Bitrix24 ulangan bo'lsa — avtomatik sinxronizatsiya
-                sync_lead_to_bitrix24(store=store, lead=lead)
-                # Google Sheets ulangan bo'lsa — avtomatik sinxronizatsiya
-                # (Bitrix24'dan mustaqil, ikkalasi ham bir vaqtda ishlashi mumkin)
-                sync_lead_to_google_sheets(store=store, lead=lead)
-            else:
+            # ── 5.5. AI javobini DB'ga saqlash ─────────────────────────────
+            #
+            # ⚠️ BUG FIX (poyga holati / race condition): avval bu yerda oddiy
+            # `.create()` ishlatilardi. Telegram bir xil update'ni ba'zan qayta
+            # yuborishi (yoki Celery'ning `acks_late=True` sozlamasi worker
+            # o'lib qolganda taskni qayta ishga tushirishi) natijasida IKKI
+            # worker BIR XIL xabarni parallel qayta ishlashi mumkin edi.
+            # `message_id=f"ai_resp_{message_id}"` — har doim bir xil, statik
+            # qiymat bo'lgani uchun, ikkinchi (yutqazgan) worker bazadagi
+            # unique cheklovga (store, message_id, platform) urilib
+            # `IntegrityError` bilan qulardi — bu esa uni 3 marta qayta urinib
+            # ko'rishga (har birida qimmat Gemini so'rovi bilan!) va oxir-
+            # oqibat ALLAQACHON MUVAFFAQIYATLI yakunlangan xabarni FAILED deb
+            # belgilab qo'yishga olib kelardi. Endi `get_or_create` — ikkinchi
+            # worker jimgina "allaqachon bor" deb bilib, hech narsa qilmay
+            # to'xtaydi.
+            _latency_ms = int((_tz.now() - _latency_anchor).total_seconds() * 1000)
+            if _latency_ms > _SLOW_RESPONSE_THRESHOLD_MS:
                 logger.warning(
-                    f"[Task] Lid aniqlandi lekin saqlanmadi! "
-                    f"data={ai_response.lead_data}"
+                    f"[Latency] SEKIN javob | {_latency_ms}ms | store={store.name} | "
+                    f"msg_id={message_id}"
                 )
 
-        # ── 8. Dastlabki xabarni COMPLETED deb belgilash ──────────────
-        ChatMessage.objects.filter(id=chat_message.id).update(
-            processing_status=ChatMessage.ProcessingStatus.COMPLETED,
-        )
+            ai_message, ai_message_created = ChatMessage.objects.get_or_create(
+                store=store,
+                customer=customer,
+                message_id=f"ai_resp_{message_id}",
+                platform=platform,
+                bot_token=store.tg_bot_token,
+                chat_id=str(chat_id),
+                defaults={
+                    "role": ChatMessage.Role.ASSISTANT,
+                    "content": ai_response.text,
+                    "processing_status": ChatMessage.ProcessingStatus.COMPLETED,
+                    "celery_task_id": self.request.id,
+                    "tokens_used": ai_response.tokens_used,
+                    "ai_model_used": ai_response.model_used,
+                    "is_group_message": is_group,
+                    "latency_ms": _latency_ms,
+                },
+            )
 
-        # ── 9. Mijozning oxirgi faollik vaqtini yangilash ─────────────
-        from django.utils import timezone
-        Customer.objects.filter(id=customer.id).update(
-            last_message_at=timezone.now()
-        )
+            if not ai_message_created:
+                # Boshqa worker bu xabarga ALLAQACHON muvaffaqiyatli javob
+                # bergan (poyga holati) — takroriy javob yubormaymiz, takroriy
+                # buyurtma yaratmaymiz, faqat asl xabarni COMPLETED deb
+                # belgilab, jimgina to'xtaymiz.
+                logger.info(
+                    f"[Task] AI javobi allaqachon mavjud (poyga holati/retry) — "
+                    f"qayta ishlanmadi | msg_id={message_id}"
+                )
+                ChatMessage.objects.filter(id=chat_message.id).update(
+                    processing_status=ChatMessage.ProcessingStatus.COMPLETED,
+                )
+                return
 
-        logger.info(
-            f"[Task] MUVAFFAQIYATLI | store={store.name} | "
-            f"msg_id={message_id}"
-        )
+            # ── 5.6. Guruhda: AI javob tayyorlanayotgan bir necha soniya
+            # ichida inson (do'kon egasi/xodim) ALLAQACHON shu mijozga qo'lda
+            # javob yozib ulgurgan bo'lsa — AI javobini ENDI yubormaymiz.
+            # ⚠️ Mention/reply talabini olib tashlaganimiz uchun (mijoz
+            # botni belgilamasa ham javob olishi uchun), bot admin bilan
+            # "ustma-ust tushib qolish" xavfi qaytadi — buni shu tekshiruv
+            # bilan qoplaymiz: ega/xodim mijozning xabaridan KEYIN o'sha
+            # guruhga (istalgan) xabar yozgan bo'lsa, demak allaqachon
+            # o'zi javob berayapti — bot ikkinchi, ehtimol qarama-qarshi
+            # javob bilan aralashmasin.
+            if is_group:
+                human_ids = set()
+                if store.tg_owner_chat_id:
+                    human_ids.add(str(store.tg_owner_chat_id))
+                from apps.stores.models import StoreStaffMember as _StoreStaffMember
+                from apps.customers.models import Customer as _Customer
+                staff_usernames = list(
+                    _StoreStaffMember.objects.filter(store=store).values_list("tg_username", flat=True)
+                )
+                if staff_usernames:
+                    human_ids.update(
+                        str(pid) for pid in _Customer.objects.filter(
+                            store=store, username__in=staff_usernames
+                        ).values_list("platform_user_id", flat=True)
+                    )
+                if human_ids and ChatMessage.objects.filter(
+                    store=store, chat_id=str(chat_id), is_group_message=True,
+                    customer__platform_user_id__in=human_ids,
+                    created_at__gt=chat_message.created_at,
+                ).exists():
+                    logger.info(
+                        f"[Task] Guruhda ega/xodim allaqachon javob bergan — AI javobi yuborilmadi | store={store.name}"
+                    )
+                    return
+
+            # ── 6. Javobni platforma orqali yuborish ──────────────────────
+            # ⚠️ Guruhda bir nechta odam yozib turishi mumkin — javobni oddiy
+            # xabar sifatida yuborsak, kim so'ragani va botning kimga javob
+            # berayotgani chalkashib qolardi. Shaxsiy chatda esa reply shart
+            # emas (faqat 1 kishi bilan suhbat).
+            sent = send_reply(
+                store=store,
+                platform=platform,
+                chat_id=chat_id,
+                text=ai_response.text,
+                customer=customer,
+                reply_to_message_id=message_id if is_group else None,
+            )
+
+            if not sent:
+                logger.warning(
+                    f"[Task] Javob yuborilmadi! "
+                    f"platform={platform} | chat_id={chat_id}"
+                )
+                # Yuborilmagan bo'lsa ham davom etamiz (buyurtma saqlash kerak)
+
+            # ── 7. Lid aniqlangan bo'lsa ──────────────────────────────────
+            if ai_response.has_lead and ai_response.lead_data:
+                logger.info(
+                    f"[Task] Lid aniqlandi! "
+                    f"mijoz={ai_response.lead_data.get('full_name')} | "
+                    f"lead_status={ai_response.lead_data.get('lead_status')}"
+                )
+
+                lead = create_lead_from_ai_data(
+                    store=store,
+                    customer=customer,
+                    lead_data=ai_response.lead_data,
+                    platform=platform,
+                    source="group" if is_group else "private_chat",
+                    source_message=ai_message,
+                )
+
+                if lead:
+                    # Egasiga Telegram xabarnomasi
+                    notify_store_owner(store=store, lead=lead)
+                    # Bitrix24 ulangan bo'lsa — avtomatik sinxronizatsiya
+                    sync_lead_to_bitrix24(store=store, lead=lead)
+                    # Google Sheets ulangan bo'lsa — avtomatik sinxronizatsiya
+                    # (Bitrix24'dan mustaqil, ikkalasi ham bir vaqtda ishlashi mumkin)
+                    sync_lead_to_google_sheets(store=store, lead=lead)
+                else:
+                    logger.warning(
+                        f"[Task] Lid aniqlandi lekin saqlanmadi! "
+                        f"data={ai_response.lead_data}"
+                    )
+
+            # ── 8. Dastlabki xabarni COMPLETED deb belgilash ──────────────
+            ChatMessage.objects.filter(id=chat_message.id).update(
+                processing_status=ChatMessage.ProcessingStatus.COMPLETED,
+            )
+
+            # ── 9. Mijozning oxirgi faollik vaqtini yangilash ─────────────
+            # ⚠️ `follow_up_stage` ham shu yerda 0'ga qaytariladi: mijoz
+            # yangi xabar yozdi — demak u endi "sukut saqlagan" emas,
+            # keyingi jimlik davri uchun follow-up hisoblagichi qaytadan
+            # boshlanishi kerak (aks holda keyingi safar jim qolganda
+            # follow-up UMUMAN yuborilmay qolardi, chunki bosqich
+            # allaqachon 2'da "tugagan" deb hisoblanardi).
+            from django.utils import timezone
+            Customer.objects.filter(id=customer.id).update(
+                last_message_at=timezone.now(),
+                follow_up_stage=0,
+                follow_up_last_sent_at=None,
+            )
+
+            logger.info(
+                f"[Task] MUVAFFAQIYATLI | store={store.name} | "
+                f"msg_id={message_id}"
+            )
+        finally:
+            cache.delete(conv_lock_key)
 
     except SoftTimeLimitExceeded:
         # Task juda uzoq ishladi
@@ -864,6 +1058,18 @@ def process_incoming_message(
             f"[Task] Max retry oshdi | store_id={store_id} | msg_id={message_id}"
         )
         _mark_message_failed(store_id, message_id, platform, "MaxRetriesExceeded", sender_id=sender_id)
+
+    # ⚠️ BUG FIX: `Retry` — Celery'ning o'zi `self.retry(...)` chaqirilganda
+    # ko'taradigan, ATAYLAB tashlangan "boshqaruv" xatosi (masalan yuqoridagi
+    # 4.9-banddagi suhbat qulfi band bo'lganda). `Retry` ham `Exception`dan
+    # meros olgani uchun, bu band bo'lmasa, pastdagi umumiy `except
+    # Exception` uni "kutilmagan xato" deb qayta ushlab, USTIGA yana bir
+    # marta (endi noto'g'ri, eksponensial 5s/25s/125s kechikish bilan)
+    # `self.retry()` chaqirar edi — bu band bilan bu holat oldindan
+    # (o'zgartirilmasdan) qayta ko'tariladi, Celery'ning o'zi to'g'ri
+    # boshqaradi.
+    except Retry:
+        raise
 
     except Exception as e:
         logger.error(

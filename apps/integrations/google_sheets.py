@@ -29,11 +29,16 @@ Joylashtirish > URL'ni nusxalab Sozlamalarga qo'yish):
         data.interested_in || '',
         data.status || '',
         data.notes || '',
-        data.conversation_summary || ''
+        data.source || ''
       ]);
       return ContentService.createTextOutput(JSON.stringify({ok: true}))
         .setMimeType(ContentService.MimeType.JSON);
     }
+
+⚠️ Bu namuna TWA'ning o'zida ham (Sozlamalar → Google Sheets →
+"Qanday ulash kerak?") ko'rsatiladi — apps/../SettingsView.tsx'dagi
+`GOOGLE_SHEETS_SCRIPT` konstantasi bilan QO'LDA sinxronda saqlanadi,
+pastdagi `payload` maydonlari o'zgarsa ikkalasini ham yangilang.
 """
 import logging
 
@@ -58,7 +63,7 @@ def push_lead_to_google_sheets(webhook_url: str, lead) -> bool:
     if not webhook_url:
         return False
 
-    status_label = {"warm": "Iliq", "cold": "Sovuq"}.get(lead.lead_status, "Aniqlanmagan")
+    status_label = {"hot": "Issiq", "warm": "Iliq", "cold": "Sovuq"}.get(lead.lead_status, "Aniqlanmagan")
     interested_in = lead.interested_course.name if lead.interested_course_id else ""
 
     payload = {

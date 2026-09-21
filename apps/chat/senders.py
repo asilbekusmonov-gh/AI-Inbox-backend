@@ -168,6 +168,33 @@ def _send_telegram_chunk(
     return False
 
 
+def delete_telegram_message(bot_token: str, chat_id: str, message_id) -> bool:
+    """
+    Telegram guruhidagi bitta xabarni o'chiradi (masalan reklama/spam
+    tozalash uchun). ⚠️ Bot shu guruhda ADMIN va "Xabarlarni o'chirish"
+    huquqiga ega bo'lishi SHART — aks holda Telegram
+    `{"ok": false, "description": "Bad Request: not enough rights..."}`
+    qaytaradi, bu yerda jimgina False qilib qaytariladi (chaqiruvchi
+    buni ega uchun bir martalik ogohlantirishga aylantiradi).
+    """
+    if not bot_token or not chat_id or not message_id:
+        logger.warning("delete_telegram_message: bo'sh parametr")
+        return False
+
+    url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(url, json={"chat_id": chat_id, "message_id": message_id})
+        data = response.json()
+        if response.status_code == 200 and data.get("ok"):
+            return True
+        logger.warning(f"Telegram deleteMessage muvaffaqiyatsiz: {data.get('description')} | chat_id={chat_id} | message_id={message_id}")
+        return False
+    except Exception as e:
+        logger.error(f"Telegram deleteMessage xatosi: {e}", exc_info=True)
+        return False
+
+
 def send_telegram_voice(
     bot_token: str,
     chat_id: str,
@@ -277,7 +304,8 @@ def _format_lead_notification(lead) -> str:
     from django.utils import timezone
 
     status_labels = {
-        "warm": "🔥 Iliq",
+        "hot": "🔥 Issiq",
+        "warm": "🟡 Iliq",
         "cold": "❄️ Sovuq",
         "unqualified": "❓ Aniqlanmagan",
     }

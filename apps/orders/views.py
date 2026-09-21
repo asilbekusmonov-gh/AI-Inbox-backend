@@ -193,18 +193,32 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
         - monthly_trend: do'kon yaratilgan oydan hozirgi oygacha, oylik lid dinamikasi
         """
         from apps.customers.models import Customer
+        from apps.chat.models import ChatMessage
+        from django.db.models import Avg
 
         target_store = self._get_target_store()
         if not target_store:
             return Response({"error": "Do'kon topilmadi"}, status=status.HTTP_404_NOT_FOUND)
 
         leads_qs = Lead.objects.filter(store=target_store, is_deleted=False)
+
+        # Requirement 9 (latency monitoring): so'nggi 7 kunlik AI javob
+        # tezligi o'rtacha ko'rsatkichi — egasi "AI sekinlashib qolmadimi"
+        # degan savolga TWA'ning o'zidan javob topishi uchun.
+        avg_latency_ms = ChatMessage.objects.filter(
+            store=target_store,
+            role=ChatMessage.Role.ASSISTANT,
+            latency_ms__isnull=False,
+            created_at__gte=timezone.now() - timezone.timedelta(days=7),
+        ).aggregate(avg=Avg("latency_ms"))["avg"]
+        avg_response_time_seconds = round(avg_latency_ms / 1000, 1) if avg_latency_ms else None
         interactions_total = Customer.objects.filter(store=target_store, is_deleted=False).count()
         leads_total = leads_qs.count()
 
         today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
         leads_today = leads_qs.filter(created_at__gte=today_start).count()
 
+        hot_count = leads_qs.filter(lead_status=Lead.LeadStatus.HOT).count()
         warm_count = leads_qs.filter(lead_status=Lead.LeadStatus.WARM).count()
         cold_count = leads_qs.filter(lead_status=Lead.LeadStatus.COLD).count()
         unqualified_count = leads_qs.filter(lead_status=Lead.LeadStatus.UNQUALIFIED).count()
@@ -261,8 +275,10 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
             "leads_total": leads_total,
             "leads_today": leads_today,
             "conversion_rate": conversion_rate,
+            "hot_count": hot_count,
             "warm_count": warm_count,
             "cold_count": cold_count,
             "unqualified_count": unqualified_count,
+            "avg_response_time_seconds": avg_response_time_seconds,
             "monthly_trend": monthly_trend,
         })

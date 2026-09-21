@@ -420,7 +420,15 @@ class ChatThreadListView(APIView):
         # suhbatlar) olinadi — inbox ro'yxati aylanma emas, "so'nggi faollik"
         # ko'rinishi bo'lgani uchun bu to'g'ri xulq-atvor ham hisoblanadi.
         RECENT_MESSAGE_LIMIT = 500
-        threads_qs = ChatMessage.objects.filter(store=target_store, is_deleted=False)
+        # ⚠️ Do'kon egasi so'radi: guruhda yozilgan xabarlar (bot guruhga
+        # qo'shilgan bo'lsa, o'sha yerdagi savol-javoblar ham) Inbox'ning
+        # "Aktiv suhbatlar" ro'yxatiga chiqmasligi kerak — faqat mijoz
+        # botning O'ZIGA (shaxsiy chatda) yozganda shu ro'yxatga qo'shilsin.
+        # Guruhdagi suhbat mutlaqo boshqa kontekst (bir nechta odam,
+        # ochiq muhokama) va operator uchun "shaxsiy mijoz suhbati" emas.
+        threads_qs = ChatMessage.objects.filter(
+            store=target_store, is_deleted=False, is_group_message=False,
+        )
         # ⚠️ Do'kon EGASINING botga o'zi (test/tekshirish uchun) yozgan
         # xabarlari — bu haqiqiy mijoz emas, shuning uchun Inbox'da
         # ko'rsatilmaydi. Aks holda egasi o'z-o'ziga yozgan "salom",

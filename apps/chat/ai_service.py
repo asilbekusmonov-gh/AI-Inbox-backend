@@ -89,16 +89,17 @@ class AIResponse:
 
 # ⚠️ PIVOT: har bir toifada endi lidni ILIQ/SOVUQ deb baholash mantig'i
 # ham bor — bu esa loyihaning asosiy maqsadi (buyurtma emas, sifatli lid
-# yig'ish). Uchala toifada ham bir xil, qat'iy mezon ishlatiladi — xato
-# qilib "warm" deb belgilashdan ko'ra ehtiyotkor bo'lish ("cold") afzal
-# ko'riladi, chunki egasi "iliq" deb belgilangan lidlarga birinchi
-# navbatda qo'ng'iroq qiladi — noto'g'ri "iliq" belgisi uning vaqtini olib
-# qo'yadi.
+# yig'ish). To'rtala toifada ham bir xil, qat'iy mezon ishlatiladi — xato
+# qilib bir daraja YUQORI belgilashdan ko'ra ehtiyotkor (bir daraja PAST)
+# bo'lish afzal ko'riladi, chunki egasi "issiq"/"iliq" deb belgilangan
+# lidlarga birinchi navbatda qo'ng'iroq qiladi — noto'g'ri yuqori baho
+# uning vaqtini olib qo'yadi.
 _LEAD_QUALIFICATION_RULE = """
 - MUHIM — MIJOZNI BAHOLASH (Lead Qualification): suhbat davomida mijozning qiziqish darajasini baholang va yuqoridagi JSON'ga albatta "lead_status" maydonini ham qo'shing:
-  • "warm" (iliq) — agar mijoz: aniq sana/vaqtni o'zi so'rasa yoki taklif qilingan vaqtni tasdiqlasa; "ha, roziman/yoziling/kelaman" kabi aniq tasdiq bersa; bir nechta jiddiy, aniq savol bersa (narx, jadval, joylashuv); yoki so'ralmasdan o'zi telefon raqamini yuborsa.
+  • "hot" (issiq) — FAQAT mijoz sotib olishga/ro'yxatdan o'tishga SO'ZSIZ, yakuniy tayyor ekanini ANIQ bildirsa: masalan o'zi "ro'yxatdan o'tkazing", "hoziroq boshlayman", "qayerga to'lov qilsam bo'ladi" kabi YAKUNIY qaror sifatida gapirsa; YOKI narxni eshitib hech qanday ikkilanish yoki e'tirozsiz darhol rozi bo'lib, ism/telefonni o'zi (deyarli so'ralmasdan) bersa VA aniq kun/soatni ham o'zi tasdiqlasa. Bu ENG YUQORI daraja — kamdan-kam qo'llaniladi, faqat mijoz chindan ham xarid qilishga tayyor ekani shubhasiz bo'lganda.
+  • "warm" (iliq) — agar mijoz: aniq sana/vaqtni o'zi so'rasa yoki taklif qilingan vaqtni tasdiqlasa; "ha, roziman/yoziling/kelaman" kabi tasdiq bersa (lekin "hot" darajasidagi to'liq yakuniy qat'iyat yo'q); bir nechta jiddiy, aniq savol bersa (narx, jadval, joylashuv); yoki so'ralmasdan o'zi telefon raqamini yuborsa.
   • "cold" (sovuq) — agar mijoz: "o'ylab ko'raman", "keyinroq yozaman", "hozircha kerak emas" desa; narxni eshitib indamay qolsa yoki e'tiroz bildirsa; yoki ism/raqamni faqat qat'iy so'ralgandan keyin, istamay bergandek bersa.
-  • Aniq bo'lmasa — "cold" deb belgilang.
+  • "hot" va "warm" orasida ikkilansangiz — har doim "warm"ni tanlang ("hot" juda kam va ishonchli holatlar uchun). "warm" va "cold" orasida ikkilansangiz — har doim "cold"ni tanlang.
 - MUHIM — "notes" MAYDONI MAJBURIY VA BATAFSIL BO'LSIN (shunchaki "ixtiyoriy izoh" emas!): bu — do'kon egasi/operatorning mijozga qo'ng'iroq qilishdan OLDIN o'qiydigan YAGONA xulosa, shuning uchun operator suhbatning o'zini (xom yozishma tarixini) o'qimasdan ham mijoz haqida YETARLICHA to'liq tasavvurga ega bo'lishi kerak — bu shunchaki bitta qisqa jumla emas, balki 2-4 gapli, quyidagilarni qamrab oluvchi tavsif bo'lsin (suhbatda aytilgan bo'lsa): mijozning aniq maqsadi/sababi, hozirgi darajasi yoki holati, muddat yoki vaqt bo'yicha aytgan gaplari, narx/byudjet haqida bildirgan fikri yoki e'tirozi, va agar biror aniq shart/talab qo'ygan bo'lsa (masalan faqat kechqurun, faqat online). Masalan: "IELTS'dan 7.0 ball olishni maqsad qilgan, hozir o'rta darajada, 2 oy ichida tayyorlanmoqchi. Narx haqida so'radi, lekin e'tiroz bildirmadi. Faqat kechqurun vaqtlar qulay ekanligini aytdi." Xom "Mijoz: ... / AI: ..." shaklidagi suhbat tarixini AYNAN takrorlamang — buni o'zingiz tahlil qilib, tabiiy matn shaklida yozing. Agar suhbatda bunday tafsilotlar aytilmagan bo'lsa, "Aniq sabab aytilmadi" deb yozing — HECH QACHON bo'sh qoldirmang.
 """
 
@@ -200,8 +201,14 @@ def build_system_prompt(store, customer=None, user_message: str = "", is_group: 
         today_warm_count = Lead.objects.filter(
             store=store, lead_status=Lead.LeadStatus.WARM, created_at__gte=today_start, is_deleted=False,
         ).count()
+        today_hot_count = Lead.objects.filter(
+            store=store, lead_status=Lead.LeadStatus.HOT, created_at__gte=today_start, is_deleted=False,
+        ).count()
 
         all_time_leads_count = Lead.objects.filter(store=store, is_deleted=False).count()
+        all_time_hot_count = Lead.objects.filter(
+            store=store, lead_status=Lead.LeadStatus.HOT, is_deleted=False,
+        ).count()
         all_time_warm_count = Lead.objects.filter(
             store=store, lead_status=Lead.LeadStatus.WARM, is_deleted=False,
         ).count()
@@ -217,9 +224,9 @@ Siz bilan muloqot qilayotgan inson ushbu do'konning HAKIQIY EGASI (Biznes Rahbar
 
 ---
 ## Hozirgi Tizim Ko'rsatkichlari (Real vaqt ma'lumotlari):
-• Bugun kelgan lidlar: {today_leads_count} ta (shundan {today_warm_count} tasi iliq)
+• Bugun kelgan lidlar: {today_leads_count} ta (shundan {today_hot_count} tasi issiq, {today_warm_count} tasi iliq)
 • JAMI (butun davr) lidlar: {all_time_leads_count} ta
-• JAMI iliq lidlar: {all_time_warm_count} ta | JAMI sovuq lidlar: {all_time_cold_count} ta
+• JAMI issiq lidlar: {all_time_hot_count} ta | JAMI iliq lidlar: {all_time_warm_count} ta | JAMI sovuq lidlar: {all_time_cold_count} ta
 • Omborda kam qolgan (<=3) mahsulot/kurslar: {low_stock_count} ta
 • Aktiv AI Soha Rejimi: {getattr(store, 'category_type', 'education')}
 • AI Bot Holati: {'Faol' if store.ai_active else 'Pauzada'}
@@ -711,13 +718,33 @@ def get_ai_response(store, customer, user_message: str, is_group: bool = False) 
         fallback_models.append(WORKING_FALLBACK_MODEL)
     last_error = None
 
+    # ⚠️ BUG FIX: avval vaqtinchalik (timeout/503/ulanish) xatolar ham
+    # doimiy xatolar (masalan o'chirilgan model) bilan bir xil — bitta
+    # urinishdan keyin darhol keyingi fallback modelga o'tib ketardi.
+    # Lekin vaqtinchalik tarmoq/server xatolari ko'pincha bir necha
+    # soniyadan keyin o'zi tuzaladi — shu sabab bunday xatolarda SHU
+    # MODEL bilan yana bir marta (qisqa kutish bilan) qayta urinamiz,
+    # keyin ham muvaffaqiyatsiz bo'lsa, avvalgidek keyingi modelga
+    # o'tamiz. ⚠️ Bu funksiyaning "hech qachon exception ko'tarmaydi,
+    # doim AIResponse qaytaradi" shartnomasi O'ZGARMAYDI — faqat urinish
+    # soni ko'payadi (tashqi chaqiruvchilar — Celery vazifasi — buni
+    # bilishi shart emas).
+    _TRANSIENT_KEYWORDS = ("timeout", "timed out", "deadline", "503", "unavailable", "connection")
+    _MAX_ATTEMPTS_PER_MODEL = 2
+
     for model_name in fallback_models:
-        try:
-            return _call_gemini(store, customer, user_message, model_name=model_name, is_group=is_group)
-        except Exception as e:
-            last_error = e
-            logger.warning(f"Gemini API xatosi ({model_name}): {e}")
-            time.sleep(1)
+        for attempt in range(_MAX_ATTEMPTS_PER_MODEL):
+            try:
+                return _call_gemini(store, customer, user_message, model_name=model_name, is_group=is_group)
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Gemini API xatosi ({model_name}, urinish {attempt + 1}/{_MAX_ATTEMPTS_PER_MODEL}): {e}")
+                is_transient = any(kw in str(e).lower() for kw in _TRANSIENT_KEYWORDS)
+                if is_transient and attempt < _MAX_ATTEMPTS_PER_MODEL - 1:
+                    time.sleep(2 * (attempt + 1))  # 2s, so'ngra keyingi urinishda 4s
+                    continue
+                time.sleep(1)  # keyingi fallback modelga o'tishdan oldin (avvalgi xulq)
+                break
 
     # ⚠️ MONITORING: bu — "barcha fallback modellar ham ishlamadi" holati,
     # ya'ni mijozga jonli AI javobi umuman berilmadi (FALLBACK_RESPONSE

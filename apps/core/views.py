@@ -24,7 +24,19 @@ def twa_dashboard_view(request):
     html_path = os.path.join(settings.BASE_DIR, "static", "twa", "index.html")
     if not os.path.exists(html_path):
         return HttpResponseNotFound("TWA not deployed yet. Run: ./deploy_twa.sh")
-    return FileResponse(open(html_path, "rb"), content_type="text/html; charset=utf-8")
+    response = FileResponse(open(html_path, "rb"), content_type="text/html; charset=utf-8")
+    # ⚠️ BUG FIX: bu javobda hech qanday Cache-Control sarlavhasi yo'q edi —
+    # Telegram'ning mobil WebView'i (va ba'zi brauzerlar) shu "qobiq"
+    # (shell) HTML'ni o'zi xohlagancha, hatto YANGI deploy qilingandan
+    # keyin ham, uzoq vaqt keshlab qo'yishi mumkin edi (jonli holatda
+    # aniqlandi: yangi deploydan keyin ham mobil TWA eski, olib
+    # tashlangan bo'limni ko'rsatishda davom etardi). `index.html`
+    # o'zi HAR DOIM eng yangisi bo'lishi SHART — u ICHIDAGI JS/CSS
+    # fayllar nomi build har safar o'zgarganda (content hash) o'zgaradi,
+    # shuning uchun ular xavfsiz uzoq keshlanaveradi (bu yerga tegilmadi).
+    response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response["Pragma"] = "no-cache"
+    return response
 
 
 def privacy_policy_view(request):

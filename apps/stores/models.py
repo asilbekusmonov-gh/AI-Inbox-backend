@@ -125,6 +125,16 @@ class Store(BaseModel):
         # `MultipleObjectsReturned` bilan qulashi mumkin edi.
         help_text="Ushbu do'konga bog'langan Telegram guruh chat_id (agar bog'langan bo'lsa)"
     )
+    group_spam_cleanup_enabled = models.BooleanField(
+        default=False,
+        help_text=(
+            "Guruhdagi reklama/spam xabarlarni (o'zga kanal havolasi, "
+            "ko'plab tashqi havola, kanaldan forward, pul ishlash "
+            "firibgarligi kabi) avtomatik o'chirish. ⚠️ Bot GURUHDA ADMIN "
+            "va 'Xabarlarni o'chirish' huquqiga ega bo'lishi SHART — aks "
+            "holda Telegram o'chirishga ruxsat bermaydi."
+        )
+    )
 
     # ── Bitrix24 integratsiyasi ─────────────────────────────────
     bitrix24_webhook_url = models.CharField(
@@ -183,6 +193,25 @@ class Store(BaseModel):
         # zaxira beradi.
         default=1500,
         help_text="AI javobining maksimal uzunligi (token)"
+    )
+
+    # ── Follow-up (javobsiz qolgan mijozlarga avtomatik eslatma) ─
+    follow_up_enabled = models.BooleanField(
+        default=True,
+        help_text="Javobsiz qolgan mijozlarga avtomatik follow-up eslatma yuborilsinmi?"
+    )
+    follow_up_delay_1_hours = models.PositiveIntegerField(
+        default=6,
+        help_text="Mijoz oxirgi xabaridan necha soat o'tgach BIRINCHI follow-up yuborilsin"
+    )
+    follow_up_delay_2_hours = models.PositiveIntegerField(
+        default=18,
+        help_text=(
+            "BIRINCHI follow-up yuborilgandan necha soat o'tgach IKKINCHI "
+            "(oxirgi) follow-up yuborilsin (mijozning asl sukutidan emas — "
+            "standart 6+18=24 soat, ya'ni asl xabaridan taxminan 24 soat "
+            "o'tib ikkinchi eslatma boradi)"
+        )
     )
 
     # ── Obuna va limit ─────────────────────────────────────────

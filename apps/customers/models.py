@@ -75,6 +75,26 @@ class Customer(BaseModel):
         null=True,
         help_text="Oxirgi xabar vaqti"
     )
+    follow_up_stage = models.PositiveSmallIntegerField(
+        default=0,
+        help_text=(
+            "Javobsiz qolgan mijozga yuborilgan avtomatik follow-up "
+            "bosqichi: 0=hali yuborilmagan, 1=birinchi yuborilgan, "
+            "2=ikkinchi (oxirgi) yuborilgan. Mijoz yangi xabar yozganda "
+            "0'ga qaytariladi."
+        )
+    )
+    follow_up_last_sent_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text=(
+            "Oxirgi follow-up bosqichi qachon yuborilgani — keyingi "
+            "bosqich shundan buyon o'tgan vaqtga qarab hisoblanadi "
+            "(mijozning ASL sukut vaqtiga emas), aks holda ancha oldin "
+            "jim qolgan mijozga BIR XIL vazifa ishga tushganda ketma-ket "
+            "ikkala bosqich birdaniga yuborilib ketishi mumkin edi."
+        )
+    )
     ai_active = models.BooleanField(
         default=True,
         help_text="Ushbu mijoz uchun AI bot faolmi? False bo'lsa operator qo'lda javob beradi"

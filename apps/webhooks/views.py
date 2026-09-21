@@ -16,6 +16,7 @@ import logging
 import httpx
 from django.conf import settings
 from django.core.cache import cache
+from django.utils import timezone
 
 from django.http import HttpResponse, JsonResponse
 from django.views import View
@@ -162,6 +163,7 @@ class TelegramWebhookView(View):
                     "chat_id": message.chat_id,
                     "raw_payload": message.raw_payload,
                     "chat_type": message.chat_type,
+                    "received_at": timezone.now().isoformat(),
                 },
                 queue="messages",
                 routing_key="messages",
@@ -588,6 +590,7 @@ class InstagramWebhookView(View):
                         "text": message.text,
                         "chat_id": message.chat_id,
                         "raw_payload": message.raw_payload,
+                        "received_at": timezone.now().isoformat(),
                     },
                     queue="messages",
                     routing_key="messages",
