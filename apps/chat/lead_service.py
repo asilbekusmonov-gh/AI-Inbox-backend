@@ -97,7 +97,7 @@ def create_lead_from_ai_data(
     qiladi (hozircha AI extraction formati o'zgarmagan, shu sababli eski
     kalit nomlari bilan ham ishlaydi):
       - {"full_name", "phone", "course_name"/"service_name", ...}
-      - Ixtiyoriy: "lead_status" ("hot"/"warm"/"cold") — kelmasa "unqualified"
+      - Ixtiyoriy: "lead_status" ("warm"/"cold") — kelmasa "unqualified"
 
     Args:
         store: Store obyekti
@@ -152,7 +152,15 @@ def create_lead_from_ai_data(
             notes = (notes + " | " if notes else "") + f"Mutaxassis: {specialist}"
 
         lead_status = str(lead_data.get("lead_status", "")).strip().lower()
-        if lead_status not in (Lead.LeadStatus.HOT, Lead.LeadStatus.WARM, Lead.LeadStatus.COLD):
+        if lead_status == "hot":
+            # ⚠️ "hot" (issiq) daraja olib tashlandi (endi faqat warm/cold) —
+            # AI eski yo'riqnoma ta'siri bilan hali ham "hot" qaytarib
+            # yuborishi mumkin. Bunday holatda ENG YAQIN pastki darajaga
+            # (warm) tushiriladi — aks holda chindan qiziqqan mijoz
+            # to'g'ridan-to'g'ri "unqualified"ga tushib, egasi undan
+            # butunlay bexabar qolib ketishi mumkin edi.
+            lead_status = Lead.LeadStatus.WARM
+        elif lead_status not in (Lead.LeadStatus.WARM, Lead.LeadStatus.COLD):
             lead_status = Lead.LeadStatus.UNQUALIFIED
 
         recent_duplicate = Lead.objects.filter(

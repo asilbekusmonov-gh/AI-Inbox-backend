@@ -304,7 +304,6 @@ def _format_lead_notification(lead) -> str:
     from django.utils import timezone
 
     status_labels = {
-        "hot": "🔥 Issiq",
         "warm": "🟡 Iliq",
         "cold": "❄️ Sovuq",
         "unqualified": "❓ Aniqlanmagan",

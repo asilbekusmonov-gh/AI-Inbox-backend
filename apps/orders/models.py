@@ -28,7 +28,6 @@ class Lead(BaseModel):
 
     class LeadStatus(models.TextChoices):
         UNQUALIFIED = "unqualified", "Aniqlanmagan"
-        HOT = "hot", "Issiq"
         WARM = "warm", "Iliq"
         COLD = "cold", "Sovuq"
 

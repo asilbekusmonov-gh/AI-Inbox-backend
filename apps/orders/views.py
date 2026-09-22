@@ -218,7 +218,6 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
         today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
         leads_today = leads_qs.filter(created_at__gte=today_start).count()
 
-        hot_count = leads_qs.filter(lead_status=Lead.LeadStatus.HOT).count()
         warm_count = leads_qs.filter(lead_status=Lead.LeadStatus.WARM).count()
         cold_count = leads_qs.filter(lead_status=Lead.LeadStatus.COLD).count()
         unqualified_count = leads_qs.filter(lead_status=Lead.LeadStatus.UNQUALIFIED).count()
@@ -275,7 +274,6 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
             "leads_total": leads_total,
             "leads_today": leads_today,
             "conversion_rate": conversion_rate,
-            "hot_count": hot_count,
             "warm_count": warm_count,
             "cold_count": cold_count,
             "unqualified_count": unqualified_count,

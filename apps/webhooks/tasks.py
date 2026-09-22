@@ -655,8 +655,21 @@ def process_incoming_message(
                         is_group_message=is_group,
                         reply_to_message_id=message_id,
                     )
+            # ⚠️ BUG FIX: avval bu yerda COMPLETED deb belgilanardi.
+            # `_load_conversation_history` esa AI'ga bergan kontekstga
+            # aynan shu holatdagi xabarlarni tortib oladi — ya'ni ega/xodim
+            # guruhda "Kurs haqida ma'lumot bera olasizmi?" kabi xabar
+            # yozsa (javobsiz qoldirilsa ham) COMPLETED bo'lib qolardi.
+            # Keyinroq shu odam Xodimlar ro'yxatidan o'chirilib, oddiy
+            # mijoz sifatida yana yozsa — AI eski (o'sha paytda ATAYLAB
+            # javobsiz qoldirilgan) savolni tarixdan o'qib, joriy xabar
+            # ("Haa yaxshi" kabi, hech narsa so'ramagan) o'rniga O'SHA
+            # ESKI savolga to'liq javob berib yuborardi (jonli holatda
+            # aniqlandi). SKIPPED holati esa `_load_conversation_history`
+            # filtridan (faqat COMPLETED) chiqib qoladi — bu xabar
+            # hech qachon AI kontekstiga qaytib kirmaydi.
             ChatMessage.objects.filter(id=chat_message.id).update(
-                processing_status=ChatMessage.ProcessingStatus.COMPLETED
+                processing_status=ChatMessage.ProcessingStatus.SKIPPED
             )
             return
 

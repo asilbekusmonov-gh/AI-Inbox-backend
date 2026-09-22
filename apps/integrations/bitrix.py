@@ -133,7 +133,6 @@ def _ensure_uzs_currency(webhook_url: str) -> None:
 # oldindan sozlashni talab qilmaydi, Bitrix24'ning har qanday ro'yxat
 # ko'rinishida (list view) title har doim ko'rinadi.
 STATUS_EMOJI = {
-    "hot": "🔥",
     "warm": "🟡",
     "cold": "❄️",
     "unqualified": "❓",
@@ -212,7 +211,7 @@ def push_lead_to_bitrix24(webhook_url: str, lead) -> bool:
     # ⚠️ BUG FIX 3: avval ism VA familiya ikkalasi ham birgalikda "name"
     # maydoniga yozilardi ("lastName" bo'sh qolardi) — endi to'g'ri
     # ajratilgan (_split_full_name).
-    status_tag = {"hot": "[ISSIQ]", "warm": "[ILIQ]", "cold": "[SOVUQ]"}.get(lead.lead_status, "")
+    status_tag = {"warm": "[ILIQ]", "cold": "[SOVUQ]"}.get(lead.lead_status, "")
     first_name, last_name = _split_full_name(lead.customer_full_name)
     name_with_status = f"{status_tag} {first_name}".strip()
 
