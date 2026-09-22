@@ -1032,6 +1032,65 @@ def process_incoming_message(
                         f"data={ai_response.lead_data}"
                     )
 
+            # ── 7.5. Sotuv suhbati holatini (stage/intent/lead_score/memory)
+            # yangilash ──────────────────────────────────────────────────
+            # ⚠️ AI'ning HAR bir javobida (lid topilgan-topilmaganidan qat'i
+            # nazar) qaytaradigan holat bloki — Customer'ga saqlanadi va
+            # KEYINGI xabarda build_system_prompt orqali AI'ga qaytarib
+            # beriladi, shu narsalarni ikkinchi marta so'ramasligi uchun.
+            state = ai_response.conversation_state
+            if state:
+                state_update_fields = {}
+                if state.get("stage"):
+                    state_update_fields["conversation_stage"] = state["stage"]
+                if state.get("lead_score") is not None:
+                    state_update_fields["lead_score"] = state["lead_score"]
+                if state.get("memory"):
+                    state_update_fields["conversation_memory"] = {
+                        **(customer.conversation_memory or {}), **state["memory"],
+                    }
+
+                # ⚠️ Lid shu javobda haqiqatan yaratilgan bo'lsa, bosqichni
+                # majburan "registered"ga o'tkazamiz — AI chiqishining
+                # o'zi bunga ishonib qolish xavfli (LLM ba'zan izchil
+                # bo'lmasligi mumkin), shu yerda DETERMINISTIK backstop.
+                if ai_response.has_lead and ai_response.lead_data:
+                    state_update_fields["conversation_stage"] = Customer.ConversationStage.REGISTERED
+
+                if state_update_fields:
+                    Customer.objects.filter(id=customer.id).update(**state_update_fields)
+
+                # ── Inson operatorga o'tkazish (Human Handoff) ────────────
+                # ⚠️ AI o'zi "bu holatda yordam bera olmayman" deb tan
+                # olganda (mijoz aniq operator so'radi, shikoyat qildi,
+                # yoki savol juda murakkab/nozik) — YANGI mexanizm o'ylab
+                # topish o'rniga MAVJUD `Customer.ai_active` bayrog'ini
+                # (Inbox'dagi AI javob berish o'chirish tugmasi ALLAQACHON
+                # shuni ishlatadi) qayta ishlatamiz.
+                if state.get("human_handoff") and customer.ai_active:
+                    Customer.objects.filter(id=customer.id).update(ai_active=False)
+                    logger.info(
+                        f"[Task] AI operatorga o'tkazdi (human_handoff) | "
+                        f"store={store.name} | customer={customer.id}"
+                    )
+                    if store.tg_owner_chat_id and store.tg_bot_token:
+                        handoff_cooldown_key = f"handoff_alert_sent:{store.id}:{customer.id}"
+                        if cache.add(handoff_cooldown_key, True, timeout=60 * 60 * 24):
+                            from apps.chat.senders import send_telegram_message as _send_handoff_alert
+                            customer_label = customer.full_name or customer.username or f"Mijoz #{customer.platform_user_id}"
+                            _send_handoff_alert(
+                                bot_token=store.tg_bot_token,
+                                chat_id=store.tg_owner_chat_id,
+                                text=(
+                                    f"🙋 <b>Mijoz operator yordamini kutmoqda</b>\n\n"
+                                    f"{customer_label} bilan suhbatda AI bot endi avtomatik "
+                                    f"javob bermaydi — savol murakkab, mijoz operator so'radi "
+                                    f"yoki shikoyat bildirdi. Iltimos, TWA Inbox orqali qo'lda "
+                                    f"javob bering."
+                                ),
+                                parse_mode="HTML",
+                            )
+
             # ── 8. Dastlabki xabarni COMPLETED deb belgilash ──────────────
             ChatMessage.objects.filter(id=chat_message.id).update(
                 processing_status=ChatMessage.ProcessingStatus.COMPLETED,

@@ -52,6 +52,15 @@ FALLBACK_RESPONSE = (
 # hisoblaganda qaytaradigan maxsus belgi (group_context_rule (b)ga qarang)
 GROUP_NO_REPLY_SENTINEL = "NO_REPLY"
 
+# ⚠️ SOTUV SUHBATI HOLATI: AI'ning HAR bir javobida (lid topilgan-
+# topilmaganidan qat'i nazar) qaytaradigan, mijozga ko'rinmaydigan
+# ikkinchi JSON blokining tetik so'zi — suhbat bosqichi (stage), niyat
+# (intent), xarid niyati darajasi (lead_score) va xotira (memory)ni olib
+# yuradi. Bu — ai_service.py'ning "IntentClassifier + StageDetector +
+# LeadScorer"i: alohida Gemini so'rovi (qo'shimcha xarajat/kechikish)
+# o'rniga, XUDDI SHU javobning bir qismi sifatida so'raladi.
+CONVERSATION_STATE_TRIGGER = "suhbat_holati"
+
 
 # ─────────────────────────────────────────────────────────────
 # DATA CLASSLAR
@@ -81,6 +90,11 @@ class AIResponse:
     # hech narsa yubormaydi — bekorga xabar bilan guruhni band qilib,
     # token sarflamaslik uchun.
     is_silent: bool = False
+    # ⚠️ Sotuv suhbati holati — AI har javobida qaytaradigan {"stage",
+    # "intent", "lead_score", "memory", "human_handoff"} dict'i (topilsa).
+    # Bu — Customer.conversation_stage/lead_score/conversation_memory'ni
+    # yangilash uchun ishlatiladi (apps/webhooks/tasks.py).
+    conversation_state: Optional[dict] = None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -94,6 +108,29 @@ class AIResponse:
 # bo'lish afzal ko'riladi, chunki egasi "iliq" deb belgilangan
 # lidlarga birinchi navbatda qo'ng'iroq qiladi — noto'g'ri yuqori baho
 # uning vaqtini olib qo'yadi.
+_SALES_METHODOLOGY = """
+## Sotuv Uslubi — Oddiy FAQ Bot Emas, Tajribali Sotuv Menejeri Kabi Gapiring
+
+Sizning vazifangiz "savolga javob berib, ro'yxatdan o'tish havolasini yuborish" EMAS. Vazifangiz: mijozni tushunish, savoliga javob berish, ehtiyojini aniqlash, ishonch qozonish, e'tirozlarni tinch hal qilish va mijozni TABIIY ravishda ro'yxatdan o'tishga olib borish — xuddi tajribali, jonli sotuv menejeri kabi. Suhbat oqimi: TANISHUV → TUSHUNISH → EHTIYOJNI ANIQLASH → MALAKALASHTIRISH → QADRIYAT → E'TIROZGA JAVOB → YUMSHOQ TAKLIF → RO'YXATDAN O'TISH. Hech qachon QIZIQISH bildirilgan zahoti to'g'ridan-to'g'ri RO'YXATDAN O'TISH HAVOLASIGA sakramang — bu faqat mijozning niyati chindan ham yuqori bo'lganda.
+
+1. AVVAL TUSHUNING, KEYIN SOTING: imkon qadar bilib oling — mijoz nimani, nega xohlaydi, hozirgi darajasi/holati, maqsadi, tashvishi. LEKIN so'roq qilmang: bir vaqtda BITTA foydali savol bering, hech qachon bitta xabarda 2+ savol bermang.
+   Yomon: "Necha yoshdasiz? Qayerdansiz? Tajribangiz qancha? Byudjetingiz qancha?"
+   Yaxshi: "Zo'r. Buni asosan ishga kirish uchun o'rganmoqchimisiz yoki boshqa maqsadingiz bormi?"
+2. BOSQICHMA-BOSQICH MA'LUMOT BERING: hammasini birdan to'kib tashlamang (bu qoida pastdagi "Xavfsizlik Qoidalari"da ham takrorlanadi — juda muhim). Narx+jadval+dastur+havolani BITTA xabarda hech qachon yubormang, tabiiy savol bilan davom eting.
+3. EHTIYOJNI ANIQLANG: mijozning haqiqiy sababini bilib oling (maqsad, daraja, kutilgan natija, muammo, muddat, tashvish) — FAQAT kerak bo'lganda, zo'rma-zo'raki emas.
+4. E'TIROZLARNI QAYTA ISHLASH: e'tirozni ma'lumot sifatida qabul qiling, himoyalanmang yoki bahslashmang. Qoida: TUSHUNING → ANIQLANG → JAVOB BERING → KEYINGI QADAMGA QAYTING.
+   Mijoz: "Qimmat ekan." — Yomon: "Lekin kursimiz juda sifatli!" — Yaxshi: "Tushunaman. Narx siz uchun asosiy masalami, yoki boshqa savolingiz ham bormi?" (keyin javobiga qarab davom eting).
+5. QADRIYAT — TAKLIFDAN OLDIN: ro'yxatdan o'tishni taklif qilishdan OLDIN, mijozga UNING vaziyatiga mos foydali ma'lumot bering. Mijoz "bu meni tushundi" deb his qilsin, "bu meni formaga yubormoqchi" emas.
+6. IJTIMOIY ISBOT — FAQAT HAQIQIY: faqat pastdagi katalog/do'kon ma'lumotlarida haqiqatan mavjud bo'lgan raqam/natijalardan foydalaning. HECH QACHON statistika, sharh yoki natijani O'YLAB TOPMANG (masalan "95% talaba ish topadi" — agar bu aniq tasdiqlangan haqiqat sifatida berilmagan bo'lsa, ASLO aytmang).
+7. HAQIQIY MUDDAT — FAQAT HUJJATLASHTIRILGAN BO'LSA: agar katalogda haqiqiy muddat/joy chegarasi bo'lsa, buni tabiiy ayting. HECH QACHON "bugun yozilmasangiz joyingiz ketadi" kabi soxta shoshilinchlik O'YLAB TOPMANG (bu — yuqoridagi "Sun'iy Shoshilinchlik Taqiqi" qoidasi bilan bir xil).
+
+### CTA (Ro'yxatdan O'tish Havolasi) Siyosati — ENG MUHIM QOIDA:
+Mijoz shunchaki qiziqish bildirgani uchun ro'yxatdan o'tishni SO'RAMANG. Bu quyidagi xarid niyati darajasiga (pastga qarang, "lead_score") qarab farqlanadi:
+- PAST (0-40): hech narsa taklif qilmang, faqat foydali javob bering.
+- O'RTA (41-70): yumshoq taklif qiling — masalan "Xohlasangiz, guruhlar haqida batafsilroq aytib beraman" yoki "Sizga mos variantni aniqlab beray."
+- YUQORI (71-100) yoki mijoz ANIQ "ro'yxatdan o'tkazing/yozilaman" desa: ism va telefon raqamini so'rang, keyin pastdagi JSON formatda lid yarating.
+"""
+
 _LEAD_QUALIFICATION_RULE = """
 - MUHIM — MIJOZNI BAHOLASH (Lead Qualification): suhbat davomida mijozning qiziqish darajasini baholang va yuqoridagi JSON'ga albatta "lead_status" maydonini ham qo'shing:
   • "warm" (iliq) — agar mijoz: aniq sana/vaqtni o'zi so'rasa yoki taklif qilingan vaqtni tasdiqlasa; "ha, roziman/yoziling/kelaman" kabi tasdiq bersa; bir nechta jiddiy, aniq savol bersa (narx, jadval, joylashuv); yoki so'ralmasdan o'zi telefon raqamini yuborsa.
@@ -102,15 +139,41 @@ _LEAD_QUALIFICATION_RULE = """
 - MUHIM — "notes" MAYDONI MAJBURIY VA BATAFSIL BO'LSIN (shunchaki "ixtiyoriy izoh" emas!): bu — do'kon egasi/operatorning mijozga qo'ng'iroq qilishdan OLDIN o'qiydigan YAGONA xulosa, shuning uchun operator suhbatning o'zini (xom yozishma tarixini) o'qimasdan ham mijoz haqida YETARLICHA to'liq tasavvurga ega bo'lishi kerak — bu shunchaki bitta qisqa jumla emas, balki 2-4 gapli, quyidagilarni qamrab oluvchi tavsif bo'lsin (suhbatda aytilgan bo'lsa): mijozning aniq maqsadi/sababi, hozirgi darajasi yoki holati, muddat yoki vaqt bo'yicha aytgan gaplari, narx/byudjet haqida bildirgan fikri yoki e'tirozi, va agar biror aniq shart/talab qo'ygan bo'lsa (masalan faqat kechqurun, faqat online). Masalan: "IELTS'dan 7.0 ball olishni maqsad qilgan, hozir o'rta darajada, 2 oy ichida tayyorlanmoqchi. Narx haqida so'radi, lekin e'tiroz bildirmadi. Faqat kechqurun vaqtlar qulay ekanligini aytdi." Xom "Mijoz: ... / AI: ..." shaklidagi suhbat tarixini AYNAN takrorlamang — buni o'zingiz tahlil qilib, tabiiy matn shaklida yozing. Agar suhbatda bunday tafsilotlar aytilmagan bo'lsa, "Aniq sabab aytilmadi" deb yozing — HECH QACHON bo'sh qoldirmang.
 """
 
+# ⚠️ Bu blok — mijozga hech qachon KO'RINMAYDI (`_clean_response_text`
+# kesib tashlaydi), lid JSON blokidan MUSTAQIL va HAR DOIM (lid
+# topilgan-topilmaganidan qat'i nazar) so'raladi. Shu orqali
+# Customer.conversation_stage/lead_score/conversation_memory HAR bir
+# xabardan keyin yangilanadi (apps/webhooks/tasks.py) va KEYINGI
+# xabarda AI'ga qaytarib beriladi (build_system_prompt) — shunda AI
+# mijoz allaqachon aytgan narsalarni qayta so'ramaydi.
+_CONVERSATION_STATE_OUTPUT_SPEC = f"""
+- MUHIM — SUHBAT HOLATINI BAHOLASH (bu — lid JSON'idan BUTUNLAY ALOHIDA, MAJBURIY blok, mijozga hech qachon ko'rinmaydi): javobingiz ENG OXIRIDA (agar lid JSON ham bo'lsa, undan OLDIN) AYNAN quyidagi formatda holat blokini qaytaring — bu HAR BIR javobingizda bo'lishi SHART, hatto lid hali yaratilmagan, mijoz shunchaki savol so'rayotgan bo'lsa ham:
+```json
+{CONVERSATION_STATE_TRIGGER}:
+{{
+  "stage": "discovery",
+  "intent": "product_interest",
+  "lead_score": 45,
+  "memory": {{"goal": "ishga kirish", "experience_level": "boshlang'ich"}},
+  "human_handoff": false
+}}
+```
+  • "stage" — quyidagi ro'yxatdan ENG mos kelgani: casual (oddiy salom/reaksiya) | information (ma'lumot so'rayapti) | interest (qiziqish bildirmoqda) | discovery (ehtiyoji aniqlanmoqda) | qualification (jiddiy savollar — narx/jadval) | high_intent (qanday ro'yxatdan o'tish so'rayapti) | objection (e'tiroz bildirdi) | ready_to_convert (aniq "ha, ro'yxatdan o'tkazing" dedi) | registered (shu javobda lid JSON ham yaratilsa).
+  • "intent" — quyidagi ro'yxatdan ENG mos kelgani: casual | greeting | information_request | product_interest | pricing_interest | schedule_interest | comparison | recommendation_request | pain_point | objection | purchase_intent | registration_request | human_operator_request | complaint | irrelevant | spam.
+  • "lead_score" — 0 dan 100 gacha butun son, BITTA kalit so'zga emas, BUTUN suhbat tarixiga (savollar, aniqlik, shoshilinchlik, e'tirozlar, ro'yxatdan o'tish haqidagi savollar) qarab baholang: 0-20 oddiy/aloqasiz, 21-40 ma'lumot izlayapti, 41-60 faol qiziqish, 61-80 malakali lid, 81-100 yuqori xarid niyati.
+  • "memory" — suhbatda ENDI bilib olgan YANGI yoki O'ZGARGAN tafsilotlar (masalan goal, experience_level, interested_product, budget_concern, preferred_schedule, objections) — FAQAT yangilarini qo'shing, allaqachon ma'lum bo'lganlarni qayta yozmang. Yangi narsa yo'q bo'lsa — bo'sh {{}} qaytaring.
+  • "human_handoff" — true FAQAT quyidagi holatlarda: mijoz ANIQ operator/inson so'rasa; shikoyat qilsa; javob berish uchun sizda YETARLI ma'lumot yo'q (noaniq/nozik/juda murakkab savol); yoki mijoz g'azablangan/norozi ko'rinsa. Aks holda har doim false.
+"""
+
 CATEGORY_PROMPTS = {
     "education": f"""
-Siz o'quv markazining konsultant botisiz.
+Siz o'quv markazining konsultant botisiz — LEKIN oddiy FAQ bot emas, tajribali sotuv menejeri kabi gapirasiz (pastdagi "Sotuv Uslubi" bo'limiga qarang).
 Asosiy maqsadingiz: Kurslar haqida ma'lumot berish va mijozni "Sinov Darsi" (Free Trial)ga ro'yxatdan o'tkazish.
-
+{_SALES_METHODOLOGY}
 Yo'riqnoma:
 - Kurslar tavsifini berishda dars davomiyligi, narxi va qulayliklarini tushuntiring.
-- Mijozni qiziqtirgan kurs bo'yicha Bepul Sinov darsiga taklif qiling.
-- MAJBURIY (lid yaratish uchun shart, boshqa hech narsa kutmasdan so'rang):
+- Mijozni qiziqtirgan kurs bo'yicha Bepul Sinov darsiga taklif qiling — LEKIN yuqoridagi CTA siyosatiga rioya qilib, faqat mijoz niyati yetarli bo'lganda.
+- MAJBURIY (lid yaratish uchun shart — LEKIN faqat mijoz niyati yuqori/tayyor bo'lganda so'rang, pastdagi "Xavfsizlik Qoidalari"dagi bosqichma-bosqichlik qoidasiga rioya qiling):
   1. O'quvchi/Mijozning ismi
   2. Telefon raqami (+998 formatida)
   3. Kurs nomi
@@ -119,7 +182,8 @@ Yo'riqnoma:
 - MUHIM — VAQTNI MAJBUR QILMANG: yuqoridagi 3 ta majburiy ma'lumot (ism, telefon, kurs) qo'lga kirgan zahoti, "preferred_time" haliyam yo'q bo'lsa ham lid JSON'ini DARHOL yarating (preferred_time'ni bo'sh qoldiring). Vaqtni faqat BIR MARTA so'rang — agar mijoz javob bermasa, "keyinroq aniqlashtiramiz" desa, yoki "sinov darsisiz to'g'ridan-to'g'ri yozilmoqchiman" desa — buni hurmat qiling, qayta-qayta so'ramang, shu zahoti lid yaratib yuboring. Aks holda mijoz vaqt aytmagani uchun lid UMUMAN yaratilmay, egasi bu qiziqqan mijozdan butunlay bexabar qolib ketadi — bu eng katta xato.
 - MUHIM — ONLAYN KURSLAR: agar kurs onlayn/masofaviy formatda bo'lsa (katalogda shunday belgilangan bo'lsa yoki mijoz "onlayn" desa), "sinov darsi vaqti"ni SO'RAMANG — bunday kurslarda aniq kun/soat tanlash unchalik ahamiyatli emas, eng muhimi operator mijoz bilan tezroq bog'lanishi. Shunchaki ism+telefon+kurs olib, "Operatorimiz tez orada siz bilan bog'lanadi" deb lid yaratib yuboring.
 {_LEAD_QUALIFICATION_RULE}
-- Ma'lumotlar olingach, javobingiz oxirida AYNAN quyidagi JSON formatni qaytaring:
+{_CONVERSATION_STATE_OUTPUT_SPEC}
+- Ism/telefon/kurs ma'lumotlari olingach, javobingiz oxirida (suhbat holati blokidan KEYIN) AYNAN quyidagi JSON formatni ham qaytaring:
 ```json
 lid_malumotlari:
 {{
@@ -134,11 +198,12 @@ lid_malumotlari:
 """,
 
     "services": f"""
-Siz xizmat ko'rsatish maskanining administrator botisiz.
+Siz xizmat ko'rsatish maskanining administrator botisiz — LEKIN oddiy FAQ bot emas, tajribali sotuv menejeri kabi gapirasiz (pastdagi "Sotuv Uslubi" bo'limiga qarang).
 Asosiy maqsadingiz: Ko'rsatiladigan xizmatlar, narxlar va ustalar haqida ma'lumot berish hamda vaqtni band qilish (Booking).
 
+{_SALES_METHODOLOGY}
 Yo'riqnoma:
-- Mijoz xizmatga yozilmoqchi bo'lganida quyidagi ma'lumotlarni to'plang:
+- Mijoz xizmatga yozilmoqchi bo'lganida quyidagi ma'lumotlarni to'plang (LEKIN faqat niyati yetarli bo'lganda — pastdagi CTA siyosatiga rioya qiling):
 - MAJBURIY (lid yaratish uchun shart, boshqa hech narsa kutmasdan so'rang):
   1. Mijozning ismi
   2. Telefon raqami (+998 formatida)
@@ -148,7 +213,8 @@ Yo'riqnoma:
   5. Band qilish vaqti va sanasi (katalogdagi mavjud vaqtlardan kelib chiqib taklif qiling)
 - MUHIM — VAQT/USTANI MAJBUR QILMANG: yuqoridagi 3 ta majburiy ma'lumot (ism, telefon, xizmat turi) qo'lga kirgan zahoti, mutaxassis/vaqt haliyam aniqlanmagan bo'lsa ham lid JSON'ini DARHOL yarating (bo'sh qoldiring). Buni faqat BIR MARTA so'rang — agar mijoz javob bermasa, "operator o'zi ayta qolsin" desa, yoki aniq vaqt aytmasa — qayta-qayta so'ramang, shu zahoti lid yaratib yuboring. Band qilish vaqtini ANIQLASHTIRISH — operatorning o'zi mijozga qo'ng'iroq qilib kelishishi mumkin bo'lgan ish, botning vazifasi emas. Aks holda mijoz vaqt aytmagani uchun lid UMUMAN yaratilmay, egasi bu qiziqqan mijozdan butunlay bexabar qolib ketadi — bu eng katta xato.
 {_LEAD_QUALIFICATION_RULE}
-- Ma'lumotlar olingach, javobingiz oxirida AYNAN quyidagi JSON formatni qaytaring:
+{_CONVERSATION_STATE_OUTPUT_SPEC}
+- Ism/telefon/xizmat turi ma'lumotlari olingach, javobingiz oxirida (suhbat holati blokidan KEYIN) AYNAN quyidagi JSON formatni ham qaytaring:
 ```json
 band_qilish_malumotlari:
 {{
@@ -434,6 +500,26 @@ Bu mijoz sizga aynan shaxsiy xabarga taklif qiluvchi havola orqali guruhdan shax
 ⚠️ YUQORIDA MUHOKAMA QILINGAN narsalarni (masalan qaysi kurs/xizmat qiziqtirgani) QAYTA SO'RAMANG — buni allaqachon bilasiz. Salomlashib, to'g'ridan-to'g'ri QOLGAN zarur ma'lumotni (ism, telefon raqami, qulay vaqt) so'rab, ro'yxatdan o'tkazishni davom ettiring.
 """
 
+    # ⚠️ Sotuv suhbati XOTIRASI: mijoz haqida oldingi xabarlarda
+    # bilib olingan (conversation_memory) va hisoblangan (stage,
+    # lead_score) narsalar shu yerda AI'ga QAYTARIB BERILADI — shu
+    # orqali AI "Siz allaqachon aytdingiz: maqsadingiz ishga kirish"
+    # kabi bilib, XUDDI SHU narsalarni ikkinchi marta so'ramaydi (bu —
+    # `_CONVERSATION_STATE_OUTPUT_SPEC`da so'ralgan "memory"ning aynan
+    # o'zi, keyingi xabarda davomiylik hosil qilish uchun ishlatiladi).
+    customer_memory_section = ""
+    if customer and (customer.conversation_memory or customer.lead_score or customer.conversation_stage != "casual"):
+        memory_lines = "\n".join(
+            f"- {key}: {value}" for key, value in (customer.conversation_memory or {}).items()
+        ) or "(hali aniq tafsilot yo'q)"
+        customer_memory_section = f"""
+---
+## Mijoz Haqida Allaqachon Ma'lum Bo'lgan Narsalar (QAYTA SO'RAMANG):
+Joriy suhbat bosqichi: {customer.conversation_stage} | Xarid niyati darajasi: {customer.lead_score}/100
+{memory_lines}
+⚠️ Yuqoridagi tafsilotlarni suhbatda AYTIB O'TILGANIDEK hisobga oling — buni allaqachon bilasiz, qayta so'ramang. Faqat YANGI, hali noaniq narsalarni so'rang.
+"""
+
     return f"""
 {base_instructions}
 
@@ -444,6 +530,7 @@ Mijoz sanani (masalan sinov darsi, band qilish, yetkazib berish uchun) aytganda 
 - Agar mijoz ALLAQACHON O'TIB KETGAN sanani aytsa (masalan bugundan oldingi kun/oy), buni AYTIB QOLDIRMANG — muloyimlik bilan ogohlantiring: "Kechirasiz, siz aytgan sana allaqachon o'tib ketgan (bugun {today_str.split(',')[0]}, {_now.day}-{_uz_months[_now.month]}). Boshqa, kelajakdagi sana/kun tanlab bera olasizmi?" va TO'G'RI (kelajakdagi) sana kelmaguncha buyurtma/lid JSON'ini HECH QACHON yubormang.
 - Faqat kelajakdagi (yoki bugungi) sanalarni tasdiqlang.
 {group_bridge_section}
+{customer_memory_section}
 ---
 ## Salomlashish va Sotuvga Yo'naltirish Qoidasi (Sales-Driven Greeting):
 - Agar mijoz suhbatni birinchi marta boshlasa, "Salom" yoki "Start" deb yozsa:
@@ -891,12 +978,18 @@ def _call_gemini(store, customer, user_message: str, model_name: str = "gemini-3
     # Lid ma'lumotlarini tekshirish
     lead_data = _extract_lead_data(response_text)
 
+    # Sotuv suhbati holati (stage/intent/lead_score/memory/human_handoff) —
+    # lid JSON'idan MUSTAQIL, HAR DOIM izlanadi (lid hali yo'q bo'lsa ham).
+    conversation_state = _extract_conversation_state(response_text)
+
     # Har doim mijozga yuboriladigan matnni tozalaymiz (JSON bloklarisiz)
     clean_text = _clean_response_text(response_text)
 
     logger.info(
         f"Gemini javob olindi | model={model_name} | "
-        f"tokens={tokens_used} | has_lead={lead_data is not None}"
+        f"tokens={tokens_used} | has_lead={lead_data is not None} | "
+        f"stage={(conversation_state or {}).get('stage')} | "
+        f"lead_score={(conversation_state or {}).get('lead_score')}"
     )
 
     return AIResponse(
@@ -905,6 +998,7 @@ def _call_gemini(store, customer, user_message: str, model_name: str = "gemini-3
         model_used=model_name,
         lead_data=lead_data,
         has_lead=lead_data is not None,
+        conversation_state=conversation_state,
     )
 
 
@@ -1012,6 +1106,81 @@ def _extract_lead_data(response_text: str) -> Optional[dict]:
     return None
 
 
+# ⚠️ `apps.customers.models.Customer.ConversationStage`dagi qiymatlar
+# bilan AYNAN bir xil bo'lishi SHART — bu yerda takrorlanishi ataylab:
+# ai_service.py modul darajasida customers appiga bog'lanib qolmasligi
+# uchun (import tartibi/aylanma bog'lanish xavfini kamaytirish).
+_VALID_CONVERSATION_STAGES = {
+    "casual", "information", "interest", "discovery", "qualification",
+    "high_intent", "objection", "ready_to_convert", "registered", "human_handoff",
+}
+_VALID_INTENTS = {
+    "casual", "greeting", "information_request", "product_interest",
+    "pricing_interest", "schedule_interest", "comparison", "recommendation_request",
+    "pain_point", "objection", "purchase_intent", "registration_request",
+    "human_operator_request", "complaint", "irrelevant", "spam",
+}
+
+
+def _extract_conversation_state(response_text: str) -> Optional[dict]:
+    """
+    AI javobidan sotuv suhbati holati (stage/intent/lead_score/memory/
+    human_handoff) blokini ajratib oladi — lid JSON'idan MUSTAQIL, HAR
+    DOIM (lid hali yo'q bo'lsa ham) izlanadi.
+
+    Qaytariladigan qiymatlar HAR DOIM xavfsiz (noto'g'ri/yo'q maydonlar
+    o'rniga muqobil qiymatlar) — chaqiruvchi kod (webhooks/tasks.py)
+    buni to'g'ridan-to'g'ri Customer'ga saqlaydi, shuning uchun bu yerda
+    validatsiya qilinmasa noto'g'ri qiymat bazaga tushib qolishi mumkin edi.
+    """
+    if not response_text or CONVERSATION_STATE_TRIGGER not in response_text:
+        return None
+
+    idx = response_text.find(CONVERSATION_STATE_TRIGGER)
+    brace_start = response_text.find("{", idx)
+    if brace_start == -1:
+        return None
+
+    brace_end = _find_balanced_json_end(response_text, brace_start)
+    if brace_end is None:
+        return None
+
+    try:
+        data = json.loads(response_text[brace_start:brace_end])
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.debug(f"Suhbat holati bloki topildi lekin parse xatosi: {e}")
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    stage = data.get("stage")
+    if stage not in _VALID_CONVERSATION_STAGES:
+        stage = None
+
+    intent = data.get("intent")
+    if intent not in _VALID_INTENTS:
+        intent = None
+
+    try:
+        lead_score = int(data.get("lead_score"))
+        lead_score = max(0, min(100, lead_score))
+    except (TypeError, ValueError):
+        lead_score = None
+
+    memory = data.get("memory")
+    if not isinstance(memory, dict):
+        memory = {}
+
+    return {
+        "stage": stage,
+        "intent": intent,
+        "lead_score": lead_score,
+        "memory": memory,
+        "human_handoff": bool(data.get("human_handoff")),
+    }
+
+
 def _clean_response_text(text: str) -> str:
     """
     AI javobidan JSON blokini o'chiradi. Mijoz faqat xushmuomala matnni ko'radi.
@@ -1035,7 +1204,7 @@ def _clean_response_text(text: str) -> str:
     if not text:
         return ""
 
-    cut_markers = ["```json", "```"] + ORDER_TRIGGER_KEYWORDS
+    cut_markers = ["```json", "```", CONVERSATION_STATE_TRIGGER] + ORDER_TRIGGER_KEYWORDS
     earliest_cut = len(text)
     lowered = text.lower()
     for marker in cut_markers:

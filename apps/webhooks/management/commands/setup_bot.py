@@ -90,13 +90,30 @@ class Command(BaseCommand):
                 # qabul qiladi" (e-commerce/order olish) degan matn bor edi —
                 # loyiha endi faqat education/services, "buyurtma" emas
                 # "lid" tushunchasi ishlatiladi.
+                # ⚠️ BUG FIX: do'kon egasi tavsifni BotFather orqali qo'lda
+                # o'zgartirib qo'ysa ham, keyingi safar `setup_bot` qayta
+                # ishga tushirilganda (masalan Cloudflare tunnel yangilanganda —
+                # bu muntazam sodir bo'ladi) uning o'zgartirishi bekor qilib,
+                # shu yerdagi qattiq yozilgan matn bilan almashtirib
+                # yuborilardi — "har safar eski holatiga qaytib qolayabdi"
+                # degan shikoyat aynan shundan edi. Tuzatish qo'lda
+                # o'zgartirishni saqlab qolish emas (bu ATAYLAB — bitta
+                # umumiy bot ko'p do'konga xizmat qilgani uchun tavsif
+                # HAR DOIM shu umumiy platforma darajasida, bironta ham
+                # do'konga bog'lanmasdan qolishi kerak), balki shu qattiq
+                # yozilgan matnning O'ZINI xohlagan holatga ("AI Lead
+                # Generation & Sales Automation Platform"ning o'zbekchasi)
+                # yangilash — shunda keyingi har qanday avtomatik qayta
+                # o'rnatishda ham aynan shu, to'g'ri matn qoladi.
                 description = (
-                    "🤖 LeadNode — mijozlarga 24/7 javob berib, ularni saralab (qualification) "
-                    "va ro'yxatdan o'tkazishgacha olib boradigan AI administrator.\n\n"
+                    "🤖 LeadNode — AI asosidagi lid generatsiyasi va sotuvni "
+                    "avtomatlashtirish platformasi.\n\n"
+                    "Mijozlarga 24/7 javob berib, ularni saralab (qualification) "
+                    "va ro'yxatdan o'tkazishgacha olib boradi.\n\n"
                     "✨ Savolingizga darhol, aniq javob beradi!\n\n"
                     "Boshlash uchun sizga yuborilgan shaxsiy havola orqali kiring 👇"
                 )
-                short_desc = "24/7 ishlaydigon AI yordamchi"
+                short_desc = "AI asosidagi lid generatsiyasi va sotuvni avtomatlashtirish platformasi"
 
                 client.post(
                     f"https://api.telegram.org/bot{bot_token}/setMyDescription",

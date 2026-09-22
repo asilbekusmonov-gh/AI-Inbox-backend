@@ -118,6 +118,49 @@ class Customer(BaseModel):
         help_text="Operator ushbu mijoz bilan suhbatni oxirgi marta ochib o'qigan vaqti"
     )
 
+    # ── Sotuv suhbati holati (AI'ning har bir javobi bilan yangilanadi) ──
+    # ⚠️ AI endi shunchaki FAQ botga o'xshab savolga javob berib
+    # qo'ymaydi — tajribali sotuv menejeri kabi suhbatni bosqichma-bosqich
+    # (CONTACT → CONTEXT → DISCOVERY → QUALIFICATION → CTA) olib boradi.
+    # Bu maydonlar AI'ning HAR bir javobida (apps/chat/ai_service.py'dagi
+    # "suhbat_holati" JSON bloki orqali) yangilanadi va KEYINGI xabarda
+    # system promptga qaytarib beriladi — shunda AI mijoz allaqachon
+    # aytgan narsalarni (maqsad, daraja, byudjet tashvishi) qayta-qayta
+    # so'ramaydi, va ro'yxatdan o'tish havolasini faqat mijoz haqiqatan
+    # tayyor bo'lganda (yuqori "lead_score"da) taklif qiladi.
+    class ConversationStage(models.TextChoices):
+        CASUAL = "casual", "Oddiy muloqot"
+        INFORMATION = "information", "Ma'lumot so'ramoqda"
+        INTEREST = "interest", "Qiziqish bildirmoqda"
+        DISCOVERY = "discovery", "Ehtiyoji aniqlanmoqda"
+        QUALIFICATION = "qualification", "Malakalashtirilmoqda"
+        HIGH_INTENT = "high_intent", "Yuqori xarid niyati"
+        OBJECTION = "objection", "E'tiroz bildirmoqda"
+        READY_TO_CONVERT = "ready_to_convert", "Ro'yxatdan o'tishga tayyor"
+        REGISTERED = "registered", "Ro'yxatdan o'tgan (lid)"
+        HUMAN_HANDOFF = "human_handoff", "Operatorga o'tkazilgan"
+
+    conversation_stage = models.CharField(
+        max_length=30,
+        choices=ConversationStage.choices,
+        default=ConversationStage.CASUAL,
+        help_text="AI aniqlagan suhbat bosqichi — CTA (ro'yxatdan o'tish havolasi) shu asosida beriladi"
+    )
+    lead_score = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="AI baholagan xarid niyati darajasi, 0-100 (0-20 oddiy, 21-40 qiziqish, 41-60 faol qiziqish, 61-80 malakali lid, 81-100 yuqori niyat)"
+    )
+    conversation_memory = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "AI suhbat davomida bilib olgan tafsilotlar (masalan: goal, "
+            "experience_level, interested_product, budget_concern, "
+            "preferred_schedule, objections) — keyingi xabarlarda AI'ga "
+            "qaytarib beriladi, xuddi shu narsalarni QAYTA SO'RAMASLIGI uchun."
+        )
+    )
+
     class Meta:
         verbose_name = "Mijoz"
         verbose_name_plural = "Mijozlar"
