@@ -280,7 +280,7 @@ class TelegramWebhookView(View):
         return None
 
     def _bind_group_to_store(self, store: Store, chat_id: str, bot_token: str) -> None:
-        """Guruhni berilgan do'konga bog'laydi va tasdiqlash xabarini yuboradi."""
+        """Guruhni berilgan do'konga bog'laydi va (kerak bo'lsa) tasdiqlash xabarini yuboradi."""
         from django.db import transaction
         from apps.chat.senders import send_telegram_message
 
@@ -290,25 +290,59 @@ class TelegramWebhookView(View):
         if str(store.tg_group_chat_id or "") == chat_id:
             return
 
+        # ⚠️ BUG FIX: oddiy Telegram guruhi ba'zan (masalan admin
+        # huquqlari/sozlamalar o'zgarganda) Telegram tomonidan avtomatik
+        # SUPERGURUHGA ko'tariladi — bu guruhning chat_id'sini BUTUNLAY
+        # YANGI qiymatga almashtiradi va Telegram buni bot uchun "yana
+        # guruhga qo'shildim" (`my_chat_member` "joined") hodisasi
+        # sifatida qayta yuboradi. Natijada bir necha soniya ichida BIR
+        # XIL (foydalanuvchi nazarida) guruh uchun ikkinchi marta
+        # bog'lanish sodir bo'lib, "muvaffaqiyatli ulandi" tabriknomasi
+        # IKKI MARTA ketardi (jonli holatda aniqlandi, foydalanuvchi buni
+        # chalkash deb topdi). Bunday holatni shu do'kon uchun YAQINDA
+        # (10 daqiqa ichida) allaqachon tasdiqlash xabari yuborilganidan
+        # bilib olamiz — ID baribir jimgina yangilanadi, lekin xabar
+        # QAYTA yuborilmaydi.
+        confirm_cooldown_key = f"group_bind_confirmed:{store.id}"
+        should_notify = cache.add(confirm_cooldown_key, True, timeout=60 * 10)
+
         with transaction.atomic():
             # Boshqa do'kon avval shu guruhga bog'langan bo'lsa — unique
             # cheklovga urilmaslik uchun avval bo'shatib olamiz.
             Store.objects.filter(tg_group_chat_id=chat_id).exclude(id=store.id).update(tg_group_chat_id=None)
             Store.objects.filter(id=store.id).update(tg_group_chat_id=chat_id)
 
-        logger.info(f"Telegram: guruh bog'landi | store={store.name} | chat_id={chat_id}")
+        logger.info(
+            f"Telegram: guruh bog'landi | store={store.name} | chat_id={chat_id} | "
+            f"tasdiqlash_xabari_yuborildi={should_notify}"
+        )
+        if not should_notify:
+            return
+
         # ⚠️ Avval bu yerda botning xom @username'i ("@LeadNodeBot")
         # ko'rsatilardi — bu bir nechta do'konga xizmat qiladigan UMUMIY
         # botning ichki texnik nomini ochib qo'yardi (do'kon egasi buni
         # o'z-o'ziga tegishli, "oq nishonli" yechim sifatida ko'rsatishni
         # xohlaydi). Endi shunchaki umumiy "botni" so'zi ishlatiladi.
+        # ⚠️ BUG FIX: avval bu yerda "A'zolar botni belgilab yoki
+        # xabariga javob (reply) berib savol bersa..." deyilardi — bu
+        # do'kon egasi/menejerlarda "bot FAQAT belgilansa ishlaydi" degan
+        # noto'g'ri tushuncha hosil qilardi. Aslida mijozlar uchun bunday
+        # shart YO'Q (@mention/reply talabi faqat do'kon egasi/xodimni
+        # oddiy mijozdan ajratish uchun ichkarida ishlatiladi, qarang:
+        # apps/webhooks/tasks.py `_is_message_addressed_to_bot`) — har
+        # qanday mijoz botni belgilamasdan ham kurs/xizmat haqida savol
+        # yozsa, AI baribir avtomatik javob beradi. Foydalanuvchi buni
+        # jonli holatda aniqladi ("mijoz botni belgilamasaham javob
+        # beradiku"), shuning uchun matn haqiqiy xatti-harakatga mos
+        # qilib tuzatildi.
         send_telegram_message(
             bot_token=bot_token,
             chat_id=chat_id,
             text=(
                 f"✅ <b>LeadNode</b> ushbu guruhga muvaffaqiyatli ulandi — endi <b>{store.name}</b> uchun ishlaydi!\n\n"
-                f"A'zolar botni belgilab yoki xabariga javob (reply) berib "
-                f"savol bersa, AI sotuvchi shu yerda javob beradi."
+                f"A'zolar kurs/xizmat haqida savol yozsa, AI sotuvchi shu yerda avtomatik javob beradi — "
+                f"botni belgilash yoki xabariga javob (reply) berish shart emas."
             ),
             parse_mode="HTML",
         )
