@@ -450,9 +450,9 @@ def process_incoming_message(
             if is_admin:
                 logger.info("[Task] Admin /start keldi -> Dashboard TWA tugmasi yuborilmoqda")
                 welcome_text = (
-                    f"<b>Assalomu alaykum, Xurmatli {store.name} Admini! 👑</b>\n\n"
+                    f"<b>Assalomu alaykum, Xurmatli {store.name} Admini!</b>\n\n"
                     f"Boshqaruv paneli orqali kelgan buyurtmalarni ko'rish, katalogingizni boshqarish hamda "
-                    f"AI bot yo'riqnomalarini sozlash uchun pastdagi tugmani bosing 👇"
+                    f"AI bot yo'riqnomalarini sozlash uchun pastdagi tugmani bosing."
                 )
                 # TWA URL: PUBLIC_URL .env dan olinadi (ngrok yoki production domain)
                 public_url = getattr(settings, "PUBLIC_URL", "").rstrip("/")
@@ -472,7 +472,7 @@ def process_incoming_message(
                     "inline_keyboard": [
                         [
                             {
-                                "text": "📊 Boshqaruv Paneli",
+                                "text": "Boshqaruv Paneli",
                                 "web_app": {"url": twa_url}
                             }
                         ]
@@ -511,44 +511,79 @@ def process_incoming_message(
                 except Exception as e:
                     logger.warning(f"[Task] Menu button o'rnatishda xato: {e}")
             else:
-                logger.info("[Task] Mijoz /start keldi -> TWA tugmasiz do'rtona qutlov yuborilmoqda")
+                # ⚠️ Agar mijoz guruhda ALLAQACHON aniq narsa haqida yozgan
+                # bo'lsa-yu (masalan "Beginner kurs bormi?"), keyin taklif
+                # qilingan shaxsiy havola orqali shu yerga o'tsa — umumiy,
+                # aloqasiz "xush kelibsiz, savolingiz bo'lsa yozing" degan
+                # STATIK xabar bilan salomlashish noto'g'ri: mijoz
+                # allaqachon ANIQ narsani so'ragan, endi undan yana bir
+                # marta "savolingiz bo'lsa yozing" deb SO'RASH ortiqcha,
+                # sovuq va suhbatni "boshidan boshlagandek" his qildiradi
+                # (foydalanuvchi buni aniq ta'kidladi). Bunday holda statik
+                # shablon o'rniga AI'ning o'ziga javob berdiramiz — buning
+                # uchun bu bloqdan ERTA `return` QILMASDAN, pastdagi
+                # umumiy AI oqimiga tushamiz: u yerda `get_ai_response`
+                # `build_system_prompt`dagi "Guruhdagi Oldingi Suhbat"
+                # ko'prigi orqali mijoz nima so'raganini ALLAQACHON bilib,
+                # to'g'ridan-to'g'ri tegishli ma'lumot (narx va h.k.) berib,
+                # ism/telefon so'rashga o'tadi — bitta "sovuq" statik
+                # xabar bosqichini tashlab yubormasdan.
+                has_group_bridge_context = ChatMessage.objects.filter(
+                    store=store, customer=customer, is_group_message=True,
+                    is_deleted=False,
+                    role__in=[ChatMessage.Role.USER, ChatMessage.Role.ASSISTANT],
+                ).exists()
 
-                # ⚠️ BUG FIX: avval bu matn har doim e-commerce'ga xos
-                # ("mahsulotlar, razmerlar, yetkazib berish") so'zlar bilan
-                # qattiq yozilgan edi — Education yoki Services turidagi
-                # do'konlarda ham xuddi shu matn chiqib, mos kelmasdi
-                # (masalan o'quv markazi uchun "razmer" ma'nosiz). Endi
-                # do'konning category_type'iga qarab mos matn tanlanadi.
-                category = getattr(store, "category_type", "education") or "education"
-                category_intros = {
-                    "education": "Kurslarimiz, dars jadvali, narxlar va Bepul Sinov Darsi bo'yicha savolingiz bo'lsa",
-                    "services": "Xizmatlarimiz, ustalarimiz, narxlar va vaqt band qilish bo'yicha savolingiz bo'lsa",
-                }
-                intro = category_intros.get(category, category_intros["education"])
+                if has_group_bridge_context:
+                    logger.info(
+                        "[Task] Mijoz guruhdan ko'prik orqali keldi -> statik "
+                        "salomlashish o'rniga AI'ga to'g'ridan-to'g'ri javob berdiriladi"
+                    )
+                    text = "Salom"
+                else:
+                    logger.info("[Task] Mijoz /start keldi -> TWA tugmasiz do'rtona qutlov yuborilmoqda")
 
-                customer_text = (
-                    f"<b>Assalomu alaykum! {store.name} rasmiy sotuv botiga xush kelibsiz! 😊</b>\n\n"
-                    f"{intro}, shunchaki xabaringizni yozing. AI sotuvchimiz yordam beradi."
+                    # ⚠️ BUG FIX: avval bu matn har doim e-commerce'ga xos
+                    # ("mahsulotlar, razmerlar, yetkazib berish") so'zlar bilan
+                    # qattiq yozilgan edi — Education yoki Services turidagi
+                    # do'konlarda ham xuddi shu matn chiqib, mos kelmasdi
+                    # (masalan o'quv markazi uchun "razmer" ma'nosiz). Endi
+                    # do'konning category_type'iga qarab mos matn tanlanadi.
+                    category = getattr(store, "category_type", "education") or "education"
+                    category_intros = {
+                        "education": "Kurslarimiz, dars jadvali, narxlar va Bepul Sinov Darsi bo'yicha savolingiz bo'lsa",
+                        "services": "Xizmatlarimiz, ustalarimiz, narxlar va vaqt band qilish bo'yicha savolingiz bo'lsa",
+                    }
+                    intro = category_intros.get(category, category_intros["education"])
+
+                    customer_text = (
+                        f"<b>Assalomu alaykum! {store.name} rasmiy sotuv botiga xush kelibsiz! 😊</b>\n\n"
+                        f"{intro}, shunchaki xabaringizni yozing. AI sotuvchimiz yordam beradi."
+                    )
+                    _send_command_reply(
+                        store, customer, platform, chat_id,
+                        text=customer_text,
+                        is_group_message=is_group,
+                        reply_to_message_id=message_id if is_group else None,
+                    )
+                    ChatMessage.objects.filter(id=chat_message.id).update(
+                        processing_status=ChatMessage.ProcessingStatus.COMPLETED
+                    )
+                    return
+
+            if is_admin:
+                ChatMessage.objects.filter(id=chat_message.id).update(
+                    processing_status=ChatMessage.ProcessingStatus.COMPLETED
                 )
-                _send_command_reply(
-                    store, customer, platform, chat_id,
-                    text=customer_text,
-                    is_group_message=is_group,
-                    reply_to_message_id=message_id if is_group else None,
-                )
-
-            ChatMessage.objects.filter(id=chat_message.id).update(
-                processing_status=ChatMessage.ProcessingStatus.COMPLETED
-            )
-            return
+                return
 
         if cmd_text.startswith("/help") or cmd_text in ["help", "yordam"]:
             logger.info("[Task] /help buyrug'i keldi -> Yordam ko'rsatmasi yuborilmoqda")
             help_text = (
-                f"<b>❓ Yordam va Ko'rsatmalar — {store.name}</b>\n\n"
-                f"1. 💬 <b>Savol berish</b>: Shunchaki xabaringizni yozing, AI sotuvchimiz darhol javob beradi.\n"
-                f"2. 🛍️ <b>Buyurtma berish</b>: Mahsulot nomini, ismingiz, telefon va manzilingizni yozsangiz AI avtomatik buyurtma oladi.\n"
-                f"3. 📊 <b>Dashboard</b>: Pastdagi tugma orqali do'kon boshqaruv paneliga kiring."
+                f"<b>Yordam va Ko'rsatmalar — {store.name}</b>\n\n"
+                f"1. <b>Savol berish</b>: Shunchaki xabaringizni yozing, AI sotuvchimiz darhol javob beradi.\n"
+                f"2. <b>Buyurtma berish</b>: Mahsulot nomini, ismingiz, telefon va manzilingizni yozsangiz AI avtomatik buyurtma oladi.\n"
+                f"3. <b>Dashboard</b>: Pastdagi tugma orqali do'kon boshqaruv paneliga kiring."
             )
             _send_command_reply(
                 store, customer, platform, chat_id,
@@ -888,6 +923,29 @@ def process_incoming_message(
                     processing_status=ChatMessage.ProcessingStatus.COMPLETED
                 )
                 return
+
+            # ── 5.4. Guruhda: bitta mijoz ketma-ket bir necha marta ijobiy
+            # fikr-mulohaza ("rahmat", "zo'r kurs ekan" va h.k.) yozsa, AI
+            # har safar iliq javob qaytaraveradi (group_context_rule (g)) —
+            # bu guruhni bir xil "Rahmat, xursandmiz!" xabarlari bilan
+            # to'ldirib, spam kabi ko'rinishi mumkin (foydalanuvchi shu
+            # xavfni ta'kidladi). Yuqoridagi umumiy anti-spam limitlar
+            # (check_rate_limit — daqiqasiga/kuniga cheklov) Gemini
+            # xarajatini allaqachon qattiq cheklaydi, lekin bu — UX
+            # tozaligi uchun qo'shimcha qatlam: xuddi egasi/xodim ack'i
+            # kabi (yuqoridagi 4.56-bandga qarang), bitta mijozga shu turdagi
+            # javob 24 soatda FAQAT bir marta yuboriladi.
+            if is_group and ai_response.conversation_state and ai_response.conversation_state.get("intent") == "positive_feedback":
+                feedback_ack_key = f"group_feedback_ack_sent:{store.id}:{customer.id}"
+                if not cache.add(feedback_ack_key, True, timeout=60 * 60 * 24):
+                    logger.info(
+                        f"[Task] Ijobiy fikr-mulohazaga takroriy javob bosildi (24s cooldown) | "
+                        f"store={store.name} | customer={customer.id} | msg_id={message_id}"
+                    )
+                    ChatMessage.objects.filter(id=chat_message.id).update(
+                        processing_status=ChatMessage.ProcessingStatus.COMPLETED
+                    )
+                    return
 
             # ── 5.5. AI javobini DB'ga saqlash ─────────────────────────────
             #

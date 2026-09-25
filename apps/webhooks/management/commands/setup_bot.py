@@ -50,22 +50,24 @@ class Command(BaseCommand):
                 username = bot_user.get("username")
                 self.stdout.write(self.style.SUCCESS(f"✅ Bot topildi: @{username} (ID: {bot_user['id']})"))
 
-                # Dev rejimida test do'kon yaratish
-                admin_user, _ = User.objects.get_or_create(username="admin", defaults={"email": "admin@example.com"})
-                store, created = Store.objects.get_or_create(
-                    owner=admin_user,
-                    defaults={
-                        "name": "AI Store Demo",
-                        "platform": Store.Platform.TELEGRAM,
-                        "tg_bot_token": bot_token,
-                        "tg_bot_username": username,
-                    }
-                )
-                if not created and store.tg_bot_token != bot_token:
-                    store.tg_bot_token = bot_token
-                    store.tg_bot_username = username
-                store.save()
-                self.stdout.write(self.style.SUCCESS(f"🏬 Do'kon biriktirildi: {store.name}"))
+                # ⚠️ BUG FIX: avval bu yerda `admin` foydalanuvchiga tegishli
+                # do'kon topilmasa, "AI Store Demo" nomli YANGI do'kon
+                # AVTOMATIK yaratilardi (eski, ilk dev-sozlash bosqichi uchun
+                # yozilgan qulaylik). Loyiha endi haqiqiy test do'konlar bilan
+                # ishlaydi — bu tunnel har yangilanganda (ya'ni `setup_bot`
+                # har safar qayta ishga tushirilganda) keraksiz "demo"
+                # do'konni jimgina qayta yaratib, tozalab tashlangan
+                # do'konlar ro'yxatini yana ifloslantirardi (foydalanuvchi
+                # buni jonli holatda aniqladi). Endi faqat MAVJUD bo'lsa
+                # tokeni yangilanadi — yangisi yaratilmaydi.
+                admin_user = User.objects.filter(username="admin").first()
+                store = Store.objects.filter(owner=admin_user).first() if admin_user else None
+                if store:
+                    if store.tg_bot_token != bot_token:
+                        store.tg_bot_token = bot_token
+                        store.tg_bot_username = username
+                        store.save()
+                    self.stdout.write(self.style.SUCCESS(f"🏬 Do'kon biriktirildi: {store.name}"))
 
                 # ⚠️ BUG FIX: bu yerda avval botning ko'rinadigan ismi
                 # (DISPLAY NAME) har safar setup_bot ishga tushganda
@@ -105,15 +107,25 @@ class Command(BaseCommand):
                 # Generation & Sales Automation Platform"ning o'zbekchasi)
                 # yangilash — shunda keyingi har qanday avtomatik qayta
                 # o'rnatishda ham aynan shu, to'g'ri matn qoladi.
+                # ⚠️ BUG FIX: avval bu yerda "AI asosidagi..." deb yozilardi —
+                # foydalanuvchi buni odamlar botni ochganda darhol "bu shunchaki
+                # AI" deb o'ylab qolishiga sabab bo'lyapti deb topdi (xohlagan
+                # taassurot — jonli, professional sotuv xizmati, robot emas).
+                # Shu sababli "AI" so'zi butunlay olib tashlandi.
+                # ⚠️ BUG FIX: avval bu yerda 🤖/✨/👇 kabi emoji bor edi —
+                # bozorga chiqadigan, jiddiy biznes mijozlariga
+                # mo'ljallangan mahsulot uchun bu "o'yinchoq"/"sticker"
+                # taassurotini berardi (foydalanuvchi buni aniq
+                # ta'kidladi). Endi toza, professional matn.
                 description = (
-                    "🤖 LeadNode — AI asosidagi lid generatsiyasi va sotuvni "
+                    "LeadNode — lid generatsiyasi va sotuvni "
                     "avtomatlashtirish platformasi.\n\n"
                     "Mijozlarga 24/7 javob berib, ularni saralab (qualification) "
                     "va ro'yxatdan o'tkazishgacha olib boradi.\n\n"
-                    "✨ Savolingizga darhol, aniq javob beradi!\n\n"
-                    "Boshlash uchun sizga yuborilgan shaxsiy havola orqali kiring 👇"
+                    "Savolingizga darhol, aniq javob beradi.\n\n"
+                    "Boshlash uchun sizga yuborilgan shaxsiy havola orqali kiring."
                 )
-                short_desc = "AI asosidagi lid generatsiyasi va sotuvni avtomatlashtirish platformasi"
+                short_desc = "Lid generatsiyasi va sotuvni avtomatlashtirish platformasi"
 
                 client.post(
                     f"https://api.telegram.org/bot{bot_token}/setMyDescription",
@@ -127,8 +139,8 @@ class Command(BaseCommand):
 
                 # 3. Buyruqlar menyusi (/ tugmasini bossa chiqadigan menyu)
                 commands = [
-                    {"command": "start", "description": "🤖 Botni ishga tushirish"},
-                    {"command": "help", "description": "❓ Yordam va ko'rsatmalar"},
+                    {"command": "start", "description": "Botni ishga tushirish"},
+                    {"command": "help", "description": "Yordam va ko'rsatmalar"},
                 ]
                 client.post(
                     f"https://api.telegram.org/bot{bot_token}/setMyCommands",
