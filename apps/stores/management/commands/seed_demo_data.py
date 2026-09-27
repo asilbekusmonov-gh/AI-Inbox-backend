@@ -176,7 +176,7 @@ class Command(BaseCommand):
                 "customer_phone": "+998 93 555 77 88",
                 "platform": Lead.Platform.TELEGRAM,
                 "source": Lead.Source.GROUP,
-                "lead_status": Lead.LeadStatus.COLD,
+                "lead_status": Lead.LeadStatus.HOT,
             },
         ]
 

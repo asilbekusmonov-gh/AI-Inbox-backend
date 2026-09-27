@@ -305,7 +305,7 @@ def _format_lead_notification(lead) -> str:
 
     status_labels = {
         "warm": "🟡 Iliq",
-        "cold": "❄️ Sovuq",
+        "hot": "🔥 Issiq",
         "unqualified": "❓ Aniqlanmagan",
     }
     status_text = status_labels.get(lead.lead_status, lead.lead_status)
@@ -323,7 +323,7 @@ def _format_lead_notification(lead) -> str:
         username_text = f"🔗 <b>Telegram:</b> @{customer.username}\n"
 
     return (
-        f"🆕 <b>YANGI LID!</b>\n"
+        f"🆕 <b>YANGI LEAD!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📋 <b>Raqam:</b> {lead.lead_number}\n"
         f"👤 <b>Ism:</b> {lead.customer_full_name}\n"

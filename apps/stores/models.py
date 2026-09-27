@@ -253,6 +253,17 @@ class Store(BaseModel):
         return bool(self.tg_bot_token)
 
     @property
+    def has_own_bot(self) -> bool:
+        """
+        Do'kon egasi umumiy (barcha do'konlar ulashadigan) demo bot
+        o'rniga O'ZINING shaxsiy Telegram botini ulaganmi — TWA
+        Sozlamalarida "Bot ulandi" holatini ko'rsatish uchun.
+        """
+        from django.conf import settings
+        master_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+        return bool(self.tg_bot_token) and self.tg_bot_token != master_token
+
+    @property
     def has_bitrix24(self) -> bool:
         """Bitrix24 webhook ulangan"""
         return bool(self.bitrix24_webhook_url)

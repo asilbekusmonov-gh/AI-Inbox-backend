@@ -13,7 +13,7 @@ from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
 COLUMNS = [
-    ("Lid raqami", "lead_number", 20),
+    ("Lead raqami", "lead_number", 20),
     ("Sana", "created_at", 18),
     ("Ism-familiya", "customer_full_name", 25),
     ("Telefon", "customer_phone", 18),
@@ -48,7 +48,7 @@ def build_leads_workbook(leads) -> BytesIO:
     """
     wb = Workbook()
     ws = wb.active
-    ws.title = "Lidlar"
+    ws.title = "Leadlar"
 
     header_font = Font(bold=True)
     for col_idx, (header, _key, width) in enumerate(COLUMNS, start=1):

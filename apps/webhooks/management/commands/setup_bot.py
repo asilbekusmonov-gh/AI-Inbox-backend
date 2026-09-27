@@ -118,14 +118,14 @@ class Command(BaseCommand):
                 # taassurotini berardi (foydalanuvchi buni aniq
                 # ta'kidladi). Endi toza, professional matn.
                 description = (
-                    "LeadNode — lid generatsiyasi va sotuvni "
+                    "LeadNode — lead generatsiyasi va sotuvni "
                     "avtomatlashtirish platformasi.\n\n"
                     "Mijozlarga 24/7 javob berib, ularni saralab (qualification) "
                     "va ro'yxatdan o'tkazishgacha olib boradi.\n\n"
                     "Savolingizga darhol, aniq javob beradi.\n\n"
                     "Boshlash uchun sizga yuborilgan shaxsiy havola orqali kiring."
                 )
-                short_desc = "Lid generatsiyasi va sotuvni avtomatlashtirish platformasi"
+                short_desc = "Lead generatsiyasi va sotuvni avtomatlashtirish platformasi"
 
                 client.post(
                     f"https://api.telegram.org/bot{bot_token}/setMyDescription",

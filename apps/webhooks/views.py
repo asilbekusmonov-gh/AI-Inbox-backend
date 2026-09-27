@@ -256,6 +256,28 @@ class TelegramWebhookView(View):
                     )
                     return target_store
 
+        # 1.5. ⚠️ BUG FIX: do'kon egasi, PARAMETRSIZ oddiy "/start" yoki
+        # "/dashboard" yozganda — bu "meni o'zimning boshqaruv panelimga
+        # olib bor" degan aniq signal. Lekin agar shu egasi ILGARI
+        # (masalan sinov uchun) BOSHQA bir do'konning mijoz havolasini
+        # bosgan bo'lsa, uning YAGONA umumiy `CustomerSession.active_store`
+        # o'sha BOSHQA do'konga almashib qolgan bo'ladi — natijada
+        # pastdagi 2-bosqich (sessiya bo'yicha) uni NOTO'G'RI ravishda
+        # boshqa do'konning oddiy mijozi deb aniqlab, egasi o'zining
+        # ASL do'koniga umuman kira olmay qolardi (jonli holatda
+        # aniqlandi: egasi boshqa loyihaning mijoz havolasini bosgach,
+        # keyin oddiy "/start" bilan o'zining boshqaruv paneliga kira
+        # olmay qoldi). Shu sabab: agar bu odam biror do'konning HAQIQIY
+        # egasi bo'lsa, oddiy "/start"/"/dashboard" har doim ANIQ O'ZINING
+        # do'koniga olib boradi — sessiyadagi boshqa do'kon nima bo'lishidan
+        # qat'i nazar.
+        if text.strip().lower() in ("/start", "/dashboard", "start", "dashboard"):
+            owned_store = Store.objects.filter(
+                tg_owner_chat_id=sender_id, is_active=True, is_deleted=False,
+            ).first()
+            if owned_store:
+                return owned_store
+
         # 2. Mavjud active user session
         sess = CustomerSession.objects.select_related("active_store").filter(
             platform_user_id=sender_id,

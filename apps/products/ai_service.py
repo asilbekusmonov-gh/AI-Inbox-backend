@@ -169,3 +169,92 @@ def parse_catalog_text(raw_text: str, category_type: str) -> list[dict]:
         item for item in data
         if isinstance(item, dict) and str(item.get("name", "")).strip()
     ]
+
+
+def analyze_product_file(
+    file_bytes: bytes,
+    mime_type: str,
+    category_type: str,
+    name: str = "",
+    price=None,
+) -> dict:
+    """
+    Egasi TWA'da "Tezkor qo'shish" rejimida biriktirgan faylni (kurs/xizmat
+    haqidagi reklama posti, broshura, jadval yoki skrinshot — rasm/PDF/matn)
+    AI orqali o'qib, "Yangi kurs/xizmat" formasining qolgan maydonlarini
+    (tavsif, kategoriya, davomiyligi, manzil va qo'shimcha ustunlar)
+    avtomatik to'ldirish uchun ma'lumot chiqaradi.
+
+    ⚠️ parse_catalog_text kabi bu ham FAQAT qoralama tayyorlaydi — chaqiruvchi
+    (frontend) natijani formaga to'ldirib ko'rsatadi, owner ko'rib chiqib
+    "Saqlash"ni bosgandan keyingina haqiqiy Product yozuvi hosil bo'ladi.
+    Shu sababli natijadagi maydon nomlari ONBOARDING importidagi
+    (CATEGORY_METADATA_HINTS) strukturaviy metadata bilan EMAS, balki
+    AddProductModal formasining o'z maydonlari (duration/location/
+    custom_fields) bilan mos keladi.
+
+    Returns:
+        dict — {"description", "category", "stock", "duration", "location",
+        "custom_fields": [{"key", "value"}, ...]}
+
+    Raises:
+        ValueError: Gemini bo'sh yoki JSON bo'lmagan javob qaytarsa
+    """
+    api_key = settings.GEMINI_API_KEY
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY sozlanmagan!")
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-3.6-flash")
+
+    label = CATEGORY_LABELS.get(category_type, "mahsulot")
+
+    context_lines = []
+    if name:
+        context_lines.append(f"Nomi: {name}")
+    if price:
+        context_lines.append(f"Narxi: {price} so'm")
+    context = ("\n\nMa'lum bo'lgan ma'lumot:\n" + "\n".join(context_lines)) if context_lines else ""
+
+    prompt = (
+        f"Biriktirilgan fayl — {label} haqida egasi yuklagan hujjat/rasm "
+        f"(masalan reklama posti, broshura, dars jadvali yoki skrinshot). "
+        f"Uning tarkibidagi ma'lumotlarni o'qib, quyidagi JSON formatda "
+        f"strukturaviy ma'lumot chiqar:\n\n"
+        '{"description": "...", "category": "...", "stock": 0, '
+        '"duration": "...", "location": "...", '
+        '"custom_fields": [{"key": "...", "value": "..."}]}\n\n'
+        "Qoidalar:\n"
+        "- FAQAT JSON obyekt qaytar — boshqa hech qanday matn, izoh yoki ```json belgisi qo'shma.\n"
+        "- \"description\" — AI sotuv boti mijozlarga ko'rsatadigan QISQA "
+        "(bitta yoki ikkita gap, 40 so'zdan oshmasin), ishonarli va sotuvga undovchi tavsif.\n"
+        "- \"category\" — faylda aniq mavzu/yo'nalish ko'rsatilgan bo'lsa shu (masalan \"Dasturlash\", \"Chet tillari\"), aks holda bo'sh qatr.\n"
+        "- \"stock\" — bo'sh joy/dona soni faylda aniq aytilgan bo'lsa shu son, aks holda 0.\n"
+        "- \"duration\" — davomiyligi (masalan \"3 oy\", \"1 soat\") faylda aytilgan bo'lsa shu, aks holda bo'sh qatr.\n"
+        "- \"location\" — manzil/joylashuv faylda aytilgan bo'lsa shu, aks holda bo'sh qatr.\n"
+        "- \"custom_fields\" — yuqoridagilarga sig'magan, lekin faylda aniq aytilgan boshqa foydali ma'lumotlar "
+        "(masalan o'qituvchi ismi, dars jadvali, format, sertifikat) — har biri qisqa o'zbekcha nom bilan, "
+        "ko'pi bilan 5 ta juftlik. Faylda yo'q narsani o'zing to'qib chiqarma.\n"
+        "- Faylda umuman o'qib bo'lmaydigan yoki aloqasiz tarkib bo'lsa, barcha maydonlarni bo'sh/0 qaytar.\n"
+        f"{context}"
+    )
+
+    file_part = {"mime_type": mime_type, "data": file_bytes}
+
+    response = model.generate_content([file_part, prompt], request_options={"timeout": 40})
+    text = (response.text or "").strip()
+    if not text:
+        raise ValueError("Gemini bo'sh javob qaytardi")
+
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, ValueError) as e:
+        raise ValueError(f"AI javobi to'g'ri JSON emas: {e}")
+
+    if not isinstance(data, dict):
+        raise ValueError("AI javobi JSON obyekt emas")
+
+    return data

@@ -29,7 +29,12 @@ class Lead(BaseModel):
     class LeadStatus(models.TextChoices):
         UNQUALIFIED = "unqualified", "Aniqlanmagan"
         WARM = "warm", "Iliq"
-        COLD = "cold", "Sovuq"
+        # ⚠️ BUG FIX: avval bu yerda "COLD" (Sovuq) bo'lgan — foydalanuvchi
+        # buni kerak emas deb topdi: barcha Lead allaqachon ism/telefon
+        # qoldirgan (ya'ni "sovuq" emas), shuning uchun ikkinchi daraja
+        # "past qiziqish" emas, balki "Iliq"dan HAM YUQORI, haqiqiy tayyor
+        # xaridor darajasi ("Issiq") bo'lishi kerak edi.
+        HOT = "hot", "Issiq"
 
     class Source(models.TextChoices):
         PRIVATE_CHAT = "private_chat", "Shaxsiy chat"
@@ -175,8 +180,8 @@ class Lead(BaseModel):
     )
 
     class Meta:
-        verbose_name = "Lid"
-        verbose_name_plural = "Lidlar"
+        verbose_name = "Lead"
+        verbose_name_plural = "Leadlar"
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["store", "lead_status"], name="lead_store_status_idx"),

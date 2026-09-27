@@ -10,6 +10,7 @@ import logging
 
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
+from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 
 from .models import Product
@@ -18,6 +19,18 @@ from .ai_service import generate_product_description
 from apps.core.authentication import get_store_from_request
 
 logger = logging.getLogger("apps.products")
+
+# "Tezkor qo'shish" (fayl orqali) rejimida qabul qilinadigan fayl turlari —
+# Gemini'ga to'g'ridan-to'g'ri (matn ajratib olish kutubxonasisiz) inline
+# ma'lumot sifatida yuborsa bo'ladigan turlar bilan cheklangan.
+_ANALYZE_FILE_ALLOWED_MIME_TYPES = {
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "text/plain",
+}
+_ANALYZE_FILE_MAX_SIZE = 10 * 1024 * 1024
 
 
 class ProductViewSet(viewsets.ModelViewSet):
@@ -93,4 +106,77 @@ class ProductViewSet(viewsets.ModelViewSet):
             )
 
         return Response({"description": description}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="analyze-file", parser_classes=[MultiPartParser])
+    def analyze_file(self, request):
+        """
+        "Tezkor qo'shish" rejimi: egasi Nomi+Narxini kiritib, kurs/xizmat
+        haqidagi faylni (rasm/PDF/matn) biriktiradi — AI faylni o'qib,
+        formaning qolgan maydonlarini (tavsif, kategoriya, davomiyligi,
+        manzil, qo'shimcha ustunlar) avtomatik chiqarib beradi. Natija
+        saqlanmaydi — frontend buni formaga to'ldirib ko'rsatadi, owner
+        ko'rib chiqib "Saqlash"ni bosgandan keyingina haqiqiy Product
+        yozuvi hosil bo'ladi (xuddi generate-description kabi).
+
+        POST /api/v1/products/analyze-file/  (multipart/form-data)
+        Body: file=<fayl>, name="..." (ixtiyoriy), price="..." (ixtiyoriy)
+        """
+        target_store = self._get_target_store()
+        if not target_store:
+            return Response({"error": "Do'kon topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        uploaded_file = request.FILES.get("file")
+        if not uploaded_file:
+            return Response({"error": "Fayl biriktirilmagan"}, status=status.HTTP_400_BAD_REQUEST)
+
+        mime_type = uploaded_file.content_type or ""
+        if mime_type not in _ANALYZE_FILE_ALLOWED_MIME_TYPES:
+            return Response(
+                {"error": "Fayl turi qo'llab-quvvatlanmaydi. PDF, JPG/PNG/WEBP rasm yoki TXT fayl yuklang."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if uploaded_file.size > _ANALYZE_FILE_MAX_SIZE:
+            return Response({"error": "Fayl hajmi 10 MB dan oshmasligi kerak"}, status=status.HTTP_400_BAD_REQUEST)
+
+        name = (request.data.get("name") or "").strip()
+        price = request.data.get("price")
+        category_type = request.data.get("category_type") or getattr(target_store, "category_type", "education")
+
+        from .ai_service import analyze_product_file
+
+        try:
+            result = analyze_product_file(
+                file_bytes=uploaded_file.read(),
+                mime_type=mime_type,
+                category_type=category_type,
+                name=name,
+                price=price,
+            )
+        except Exception as e:
+            logger.error(f"[AI File Analyze] Tahlil xatosi: {e} | store={target_store.name}", exc_info=True)
+            return Response(
+                {"error": "AI faylni tahlil qila olmadi. Birozdan so'ng qayta urinib ko'ring yoki to'liq shaklni ishlating."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        custom_fields = result.get("custom_fields")
+        if not isinstance(custom_fields, list):
+            custom_fields = []
+        cleaned_custom_fields = [
+            {"key": str(f.get("key", "")).strip(), "value": str(f.get("value", "")).strip()}
+            for f in custom_fields
+            if isinstance(f, dict) and str(f.get("key", "")).strip() and str(f.get("value", "")).strip()
+        ][:5]
+
+        return Response(
+            {
+                "description": str(result.get("description") or "").strip(),
+                "category": str(result.get("category") or "").strip(),
+                "stock": result.get("stock") or 0,
+                "duration": str(result.get("duration") or "").strip(),
+                "location": str(result.get("location") or "").strip(),
+                "custom_fields": cleaned_custom_fields,
+            },
+            status=status.HTTP_200_OK,
+        )
 

@@ -23,6 +23,7 @@ class StoreSerializer(serializers.ModelSerializer):
     bitrix24_connected = serializers.SerializerMethodField()
     google_sheets_connected = serializers.SerializerMethodField()
     telegram_group_connected = serializers.SerializerMethodField()
+    own_bot_connected = serializers.SerializerMethodField()
 
     class Meta:
         model = Store
@@ -48,6 +49,7 @@ class StoreSerializer(serializers.ModelSerializer):
             "telegram_group_connected",
             "group_spam_cleanup_enabled",
             "tg_bot_username",
+            "own_bot_connected",
             "created_at",
             "updated_at",
         ]
@@ -73,6 +75,9 @@ class StoreSerializer(serializers.ModelSerializer):
 
     def get_google_sheets_connected(self, obj) -> bool:
         return obj.has_google_sheets
+
+    def get_own_bot_connected(self, obj) -> bool:
+        return obj.has_own_bot
 
 
 class StoreConfigUpdateSerializer(serializers.ModelSerializer):

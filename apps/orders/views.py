@@ -143,7 +143,7 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
             file_bytes=buffer.read(),
             filename=filename,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            caption=f"📊 Lidlar ro'yxati — {queryset.count()} ta lid",
+            caption=f"📊 Leadlar ro'yxati — {queryset.count()} ta lead",
         )
         if not sent:
             return Response(
@@ -190,7 +190,7 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
         - conversed_total: haqiqiy AI muloqoti bo'lgan (o'ziga xos) mijozlar soni
         - leads_total/leads_today: lid soni (jami / bugun)
         - conversion_rate: leads_total / interactions_total (%)
-        - warm/cold/unqualified_count: AI baholagan lid holatlari bo'yicha son
+        - warm/hot/unqualified_count: AI baholagan lid holatlari bo'yicha son
         - monthly_trend: do'kon yaratilgan oydan hozirgi oygacha, har oy uchun
           {month, label, interactions, conversed, leads} — voronkaning HAR
           UCHALA bosqichi bo'yicha oylik dinamika
@@ -253,7 +253,7 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
         leads_today = leads_qs.filter(created_at__gte=today_start).count()
 
         warm_count = leads_qs.filter(lead_status=Lead.LeadStatus.WARM).count()
-        cold_count = leads_qs.filter(lead_status=Lead.LeadStatus.COLD).count()
+        hot_count = leads_qs.filter(lead_status=Lead.LeadStatus.HOT).count()
         unqualified_count = leads_qs.filter(lead_status=Lead.LeadStatus.UNQUALIFIED).count()
 
         conversion_rate = round((leads_total / interactions_total) * 100, 1) if interactions_total else 0.0
@@ -348,7 +348,7 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
             "leads_today": leads_today,
             "conversion_rate": conversion_rate,
             "warm_count": warm_count,
-            "cold_count": cold_count,
+            "hot_count": hot_count,
             "unqualified_count": unqualified_count,
             "avg_response_time_seconds": avg_response_time_seconds,
             "monthly_trend": monthly_trend,

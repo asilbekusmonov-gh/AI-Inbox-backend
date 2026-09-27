@@ -63,7 +63,7 @@ def push_lead_to_google_sheets(webhook_url: str, lead) -> bool:
     if not webhook_url:
         return False
 
-    status_label = {"warm": "Iliq", "cold": "Sovuq"}.get(lead.lead_status, "Aniqlanmagan")
+    status_label = {"warm": "Iliq", "hot": "Issiq"}.get(lead.lead_status, "Aniqlanmagan")
     interested_in = lead.interested_course.name if lead.interested_course_id else ""
 
     payload = {

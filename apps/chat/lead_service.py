@@ -4,9 +4,9 @@ Lid Yaratuvchisi — AI javobidan Lead yaratadi.
 AI suhbatdan ism, telefon va (ixtiyoriy) qiziqqan kurs/xizmat nomini
 aniqlagach, bu modul Lead yozuvini yaratadi va egasiga xabar beradi.
 
-Iliq/sovuq baholash (lead_status) AI'ning system prompt darajasida
+Iliq/issiq baholash (lead_status) AI'ning system prompt darajasida
 qilinadi (apps/chat/ai_service.py, CATEGORY_PROMPTS) — bu yerda faqat
-`lead_data` ichidan tayyor "lead_status" (warm/cold) o'qib olinadi, aks
+`lead_data` ichidan tayyor "lead_status" (warm/hot) o'qib olinadi, aks
 holda yoki qiymat noto'g'ri bo'lsa "unqualified" (aniqlanmagan) qilib
 qo'yiladi.
 """
@@ -97,7 +97,7 @@ def create_lead_from_ai_data(
     qiladi (hozircha AI extraction formati o'zgarmagan, shu sababli eski
     kalit nomlari bilan ham ishlaydi):
       - {"full_name", "phone", "course_name"/"service_name", ...}
-      - Ixtiyoriy: "lead_status" ("warm"/"cold") — kelmasa "unqualified"
+      - Ixtiyoriy: "lead_status" ("warm"/"hot") — kelmasa "unqualified"
 
     Args:
         store: Store obyekti
@@ -152,15 +152,17 @@ def create_lead_from_ai_data(
             notes = (notes + " | " if notes else "") + f"Mutaxassis: {specialist}"
 
         lead_status = str(lead_data.get("lead_status", "")).strip().lower()
-        if lead_status == "hot":
-            # ⚠️ "hot" (issiq) daraja olib tashlandi (endi faqat warm/cold) —
-            # AI eski yo'riqnoma ta'siri bilan hali ham "hot" qaytarib
-            # yuborishi mumkin. Bunday holatda ENG YAQIN pastki darajaga
-            # (warm) tushiriladi — aks holda chindan qiziqqan mijoz
-            # to'g'ridan-to'g'ri "unqualified"ga tushib, egasi undan
-            # butunlay bexabar qolib ketishi mumkin edi.
+        if lead_status == "cold":
+            # ⚠️ BUG FIX: avval bu yerda "hot" darajasi "olib tashlangan"
+            # deb pastga (warm) tushirilardi — foydalanuvchi buni TESKARI
+            # o'zgartirdi: endi "cold" (sovuq) darajasi kerak emas (har
+            # qanday Lead — ism/telefon qoldirgan real qiziqish, "sovuq"
+            # emas), "hot" (issiq) esa haqiqiy, YUQORI daraja sifatida
+            # QAYTARILDI. AI eski yo'riqnoma ta'siri/inertsiya bilan hali
+            # ham "cold" qaytarib yuborishi mumkin — bunday holatda ENG
+            # YAQIN, endi mavjud bo'lgan bazaviy darajaga (warm) tushiriladi.
             lead_status = Lead.LeadStatus.WARM
-        elif lead_status not in (Lead.LeadStatus.WARM, Lead.LeadStatus.COLD):
+        elif lead_status not in (Lead.LeadStatus.WARM, Lead.LeadStatus.HOT):
             lead_status = Lead.LeadStatus.UNQUALIFIED
 
         recent_duplicate = Lead.objects.filter(

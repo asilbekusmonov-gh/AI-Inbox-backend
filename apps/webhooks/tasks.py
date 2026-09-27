@@ -543,22 +543,14 @@ def process_incoming_message(
                 else:
                     logger.info("[Task] Mijoz /start keldi -> TWA tugmasiz do'rtona qutlov yuborilmoqda")
 
-                    # ⚠️ BUG FIX: avval bu matn har doim e-commerce'ga xos
-                    # ("mahsulotlar, razmerlar, yetkazib berish") so'zlar bilan
-                    # qattiq yozilgan edi — Education yoki Services turidagi
-                    # do'konlarda ham xuddi shu matn chiqib, mos kelmasdi
-                    # (masalan o'quv markazi uchun "razmer" ma'nosiz). Endi
-                    # do'konning category_type'iga qarab mos matn tanlanadi.
-                    category = getattr(store, "category_type", "education") or "education"
-                    category_intros = {
-                        "education": "Kurslarimiz, dars jadvali, narxlar va Bepul Sinov Darsi bo'yicha savolingiz bo'lsa",
-                        "services": "Xizmatlarimiz, ustalarimiz, narxlar va vaqt band qilish bo'yicha savolingiz bo'lsa",
-                    }
-                    intro = category_intros.get(category, category_intros["education"])
-
+                    # ⚠️ BUG FIX: avval bu xabar uzun edi (do'kon turiga
+                    # qarab tanlangan intro jumlasi + "AI sotuvchimiz
+                    # yordam beradi" bilan) — foydalanuvchi buni
+                    # qisqartirishni so'radi, oddiy va tabiiy salomlashuv
+                    # yetarli.
                     customer_text = (
-                        f"<b>Assalomu alaykum! {store.name} rasmiy sotuv botiga xush kelibsiz! 😊</b>\n\n"
-                        f"{intro}, shunchaki xabaringizni yozing. AI sotuvchimiz yordam beradi."
+                        f"<b>Assalomu alaykum! {store.name} rasmiy botiga xush kelibsiz! 😊</b>\n\n"
+                        f"Qanday savolingiz bor?"
                     )
                     _send_command_reply(
                         store, customer, platform, chat_id,

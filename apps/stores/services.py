@@ -22,6 +22,8 @@ import httpx
 from django.conf import settings
 from django.utils import timezone
 
+from .models import Store
+
 logger = logging.getLogger("apps.stores")
 
 META_GRAPH_VERSION = "v18.0"
@@ -380,6 +382,113 @@ def disconnect_instagram_from_store(store) -> dict:
         f"[Instagram Disconnect] Uzildi: store={store.name}"
     )
     return {"success": True}
+
+
+# ─────────────────────────────────────────────────────────────
+# Do'kon egasining shaxsiy Telegram botini ulash (white-label)
+# ─────────────────────────────────────────────────────────────
+
+TELEGRAM_API_BASE = "https://api.telegram.org/bot"
+
+
+def connect_telegram_bot_to_store(store, bot_token: str) -> dict:
+    """
+    Do'kon egasi @BotFather'dan olgan O'Z shaxsiy bot tokenini ulaydi —
+    shundan keyin mijozlar, guruh va TWA autentifikatsiyasi umumiy demo
+    bot o'rniga to'liq EGASINING O'Z boti orqali ishlaydi (webhook
+    marshrutlash — apps/webhooks/urls.py'dagi `telegram/<bot_token>/`
+    yo'li — allaqachon bot-token asosida ishlaydi, shuning uchun bu
+    yerda faqat: tokenni tekshirish, webhook o'rnatish va saqlash kifoya).
+
+    Dashboard Menyu tugmasi bu yerda ATAYLAB o'rnatilmaydi — egasi o'z
+    botiga birinchi marta /start bosganda avtomatik o'rnatiladi
+    (apps/webhooks/tasks.py, mavjud kod, o'zgarishsiz ishlayveradi).
+
+    Args:
+        store: Store obyekti (ulanadigan do'kon)
+        bot_token: @BotFather bergan token (masalan "123456:ABC-DEF...")
+
+    Returns:
+        {"success": True, "bot_username": "MeningBotim"}
+
+    Raises:
+        ValueError: token bo'sh/noto'g'ri, allaqachon boshqa do'konga
+                    ulangan, yoki Telegram API bilan bog'lanib bo'lmasa
+    """
+    bot_token = (bot_token or "").strip()
+    if not bot_token:
+        raise ValueError("Bot token kiritilmagan")
+
+    master_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+    if master_token and bot_token == master_token:
+        raise ValueError(
+            "Bu tizimning umumiy (demo) boti — shaxsiy bot sifatida ulab bo'lmaydi. "
+            "@BotFather orqali YANGI bot yarating."
+        )
+
+    # ⚠️ Boshqa do'kon allaqachon shu tokendan foydalanayotgan bo'lishi
+    # mumkin (masalan tasodifan boshqa egadan nusxa olingan) — bunday
+    # holatda ikkala do'kon ham bir-birining xabarlarini ola boshlaydi.
+    already_used = (
+        Store.objects.exclude(pk=store.pk)
+        .filter(tg_bot_token=bot_token, is_active=True, is_deleted=False)
+        .exists()
+    )
+    if already_used:
+        raise ValueError(
+            "Bu bot tokeni allaqachon boshqa do'konga ulangan. "
+            "Har bir do'kon uchun ALOHIDA (@BotFather'da yangi) bot yarating."
+        )
+
+    public_url = getattr(settings, "PUBLIC_URL", "")
+    if not public_url:
+        raise ValueError("Server hali ochiq manzilga (PUBLIC_URL) ega emas — administratorga murojaat qiling.")
+
+    # ── 1. Tokenni tekshirish (getMe) ─────────────────────────
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            res = client.get(f"{TELEGRAM_API_BASE}{bot_token}/getMe")
+        data = res.json()
+    except httpx.TimeoutException:
+        raise ValueError("Telegram API bilan bog'lanish vaqti o'tdi. Qayta urinib ko'ring.")
+    except httpx.RequestError as e:
+        raise ValueError(f"Telegram API bilan bog'lanishda tarmoq xatosi: {e}")
+
+    if not data.get("ok"):
+        raise ValueError(
+            "Bot tokeni noto'g'ri. @BotFather'dan olgan tokenni to'g'ri nusxalaganingizga ishonch hosil qiling."
+        )
+
+    bot_username = data["result"].get("username", "")
+
+    # ── 2. Webhook o'rnatish ───────────────────────────────────
+    webhook_url = f"{public_url}/webhook/telegram/{bot_token}/"
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            res = client.post(
+                f"{TELEGRAM_API_BASE}{bot_token}/setWebhook",
+                json={
+                    "url": webhook_url,
+                    "secret_token": settings.TELEGRAM_WEBHOOK_SECRET,
+                },
+            )
+        res_data = res.json()
+    except httpx.TimeoutException:
+        raise ValueError("Telegram webhook o'rnatishda ulanish vaqti o'tdi. Qayta urinib ko'ring.")
+    except httpx.RequestError as e:
+        raise ValueError(f"Telegram webhook o'rnatishda tarmoq xatosi: {e}")
+
+    if not res_data.get("ok"):
+        raise ValueError(f"Telegram webhook o'rnatib bo'lmadi: {res_data.get('description', 'noma`lum xato')}")
+
+    # ── 3. Store'ga saqlash ────────────────────────────────────
+    store.tg_bot_token = bot_token
+    store.tg_bot_username = bot_username
+    store.save(update_fields=["tg_bot_token", "tg_bot_username", "updated_at"])
+
+    logger.info(f"[Telegram Bot Connect] Muvaffaqiyatli ulandi: store={store.name} | bot=@{bot_username}")
+
+    return {"success": True, "bot_username": bot_username}
 
 
 # ─────────────────────────────────────────────────────────────

@@ -306,6 +306,43 @@ class InstagramDisconnectView(APIView):
         return Response(result, status=status.HTTP_200_OK)
 
 
+class TelegramBotConnectView(APIView):
+    """
+    Do'kon egasining O'Z shaxsiy Telegram botini (@BotFather orqali
+    yaratilgan) ulash — white-label: shundan keyin mijozlar, guruh va
+    TWA autentifikatsiyasi umumiy demo bot o'rniga egasining o'z boti
+    orqali ishlaydi.
+
+    POST /api/v1/store/telegram/connect-bot/
+    Body: {"bot_token": "123456:ABC-DEF..."}
+    Response: {"success": true, "bot_username": "MeningBotim"}
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        store = get_store_from_request(request)
+        if not store:
+            return Response({"error": "Do'kon topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        bot_token = (request.data.get("bot_token") or "").strip()
+        if not bot_token:
+            return Response({"error": "Bot token kiritilmagan"}, status=status.HTTP_400_BAD_REQUEST)
+
+        from apps.stores.services import connect_telegram_bot_to_store
+
+        try:
+            result = connect_telegram_bot_to_store(store, bot_token)
+            return Response(result, status=status.HTTP_200_OK)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Telegram bot connect kutilmagan xato: {e}", exc_info=True)
+            return Response(
+                {"error": "Telegram bilan ulanishda kutilmagan xato yuz berdi"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+
 class TelegramGroupDisconnectView(APIView):
     """
     Do'kondan bog'langan Telegram guruhini uzish (egasi tasodifan

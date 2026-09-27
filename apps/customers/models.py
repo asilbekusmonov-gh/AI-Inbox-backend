@@ -137,7 +137,7 @@ class Customer(BaseModel):
         HIGH_INTENT = "high_intent", "Yuqori xarid niyati"
         OBJECTION = "objection", "E'tiroz bildirmoqda"
         READY_TO_CONVERT = "ready_to_convert", "Ro'yxatdan o'tishga tayyor"
-        REGISTERED = "registered", "Ro'yxatdan o'tgan (lid)"
+        REGISTERED = "registered", "Ro'yxatdan o'tgan (lead)"
         HUMAN_HANDOFF = "human_handoff", "Operatorga o'tkazilgan"
 
     conversation_stage = models.CharField(
