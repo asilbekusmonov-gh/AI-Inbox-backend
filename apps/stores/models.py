@@ -8,6 +8,7 @@ shu Store'ga Foreign Key orqali bog'lanadi.
 from django.db import models
 from django.contrib.auth.models import User
 from apps.core.models import BaseModel
+from apps.core.fields import EncryptedCharField, EncryptedTextField, sha256_hex
 
 
 class Store(BaseModel):
@@ -75,10 +76,10 @@ class Store(BaseModel):
         null=True,
         help_text="Instagram Page ID (Meta Graph API)"
     )
-    ig_access_token = models.TextField(
+    ig_access_token = EncryptedTextField(
         blank=True,
         null=True,
-        help_text="Instagram long-lived access token (shifrlangan saqlash tavsiya etiladi)"
+        help_text="Instagram long-lived access token — bazada shifrlangan holda saqlanadi"
     )
     ig_token_expires_at = models.DateTimeField(
         blank=True,
@@ -87,11 +88,28 @@ class Store(BaseModel):
     )
 
     # ── Telegram sozlamalari ───────────────────────────────────
-    tg_bot_token = models.CharField(
-        max_length=100,
+    tg_bot_token = EncryptedCharField(
+        max_length=255,
         blank=True,
         null=True,
-        help_text="Telegram Bot Token (@BotFather'dan olingan)"
+        help_text="Telegram Bot Token (@BotFather'dan olingan) — bazada shifrlangan holda saqlanadi"
+    )
+    # ⚠️ tg_bot_token endi shifrlangan — Fernet har safar boshqa natija
+    # bergani uchun uni `.filter(tg_bot_token=...)` bilan to'g'ridan-to'g'ri
+    # qidirib bo'lmaydi. Shu sabab ALOHIDA, bir tomonlama (SHA-256) hash
+    # ustuni — faqat aniq (exact-match) qidiruv uchun, maxfiy emas, chunki
+    # undan asl tokenni qaytarib bo'lmaydi. `save()` da avtomatik yangilanadi.
+    # ⚠️ `unique=True` ATAYLAB qo'yilmagan: bir nechta do'kon hozir ham
+    # bitta umumiy (demo/master) botni ulashishi — bu haqiqiy, normal
+    # holat. "Boshqa egasining shaxsiy botini tasodifan ulash mumkin
+    # emas" qoidasi bu yerda emas, application darajasida
+    # (apps/stores/services.py::connect_telegram_bot_to_store) tekshiriladi.
+    tg_bot_token_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text="tg_bot_token'ning SHA-256 hash'i — faqat tezkor qidiruv uchun (apps/webhooks/views.py)"
     )
     tg_bot_username = models.CharField(
         max_length=100,
@@ -137,11 +155,11 @@ class Store(BaseModel):
     )
 
     # ── Bitrix24 integratsiyasi ─────────────────────────────────
-    bitrix24_webhook_url = models.CharField(
+    bitrix24_webhook_url = EncryptedCharField(
         max_length=500,
         blank=True,
         null=True,
-        help_text="Bitrix24 inbound webhook manzili (masalan: https://company.bitrix24.com/rest/1/xxxxxxxx/) — yangi lidlar avtomatik shu yerga yuboriladi"
+        help_text="Bitrix24 inbound webhook manzili (masalan: https://company.bitrix24.com/rest/1/xxxxxxxx/) — yangi lidlar avtomatik shu yerga yuboriladi, bazada shifrlangan holda saqlanadi"
     )
 
     # ── Google Sheets integratsiyasi ─────────────────────────────
@@ -152,11 +170,11 @@ class Store(BaseModel):
     # Script joylashtirib, uni Web App sifatida deploy qiladi va olingan
     # URL'ni shu yerga qo'yadi (apps/integrations/google_sheets.py'da
     # to'liq Apps Script namunasi bor).
-    google_sheets_webhook_url = models.CharField(
+    google_sheets_webhook_url = EncryptedCharField(
         max_length=500,
         blank=True,
         null=True,
-        help_text="Google Sheets Apps Script Web App manzili — yangi lidlar avtomatik shu yerga (qator sifatida) yuboriladi"
+        help_text="Google Sheets Apps Script Web App manzili — yangi lidlar avtomatik shu yerga (qator sifatida) yuboriladi, bazada shifrlangan holda saqlanadi"
     )
 
     # ── AI sozlamalari ─────────────────────────────────────────
@@ -241,6 +259,15 @@ class Store(BaseModel):
 
     def __str__(self):
         return f"{self.name} ({self.owner.username})"
+
+    def save(self, *args, **kwargs):
+        # tg_bot_token endi shifrlangan holda saqlanadi, shuning uchun
+        # bazada to'g'ridan-to'g'ri qidirib bo'lmaydi — qidiruv uchun
+        # ALOHIDA hash ustuni har safar avtomatik yangilanadi (chaqiruvchi
+        # kod — setup_bot.py, connect_telegram_bot_to_store va h.k. —
+        # bu haqda o'ylashi shart emas).
+        self.tg_bot_token_hash = sha256_hex(self.tg_bot_token) if self.tg_bot_token else None
+        super().save(*args, **kwargs)
 
     @property
     def has_instagram(self) -> bool:

@@ -23,6 +23,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from .models import Store
+from apps.core.fields import sha256_hex
 
 logger = logging.getLogger("apps.stores")
 
@@ -429,9 +430,11 @@ def connect_telegram_bot_to_store(store, bot_token: str) -> dict:
     # ⚠️ Boshqa do'kon allaqachon shu tokendan foydalanayotgan bo'lishi
     # mumkin (masalan tasodifan boshqa egadan nusxa olingan) — bunday
     # holatda ikkala do'kon ham bir-birining xabarlarini ola boshlaydi.
+    # tg_bot_token endi shifrlangan — hash orqali qidiramiz (yuqoridagi
+    # apps/webhooks/views.py::_get_store_by_token bilan bir xil sabab).
     already_used = (
         Store.objects.exclude(pk=store.pk)
-        .filter(tg_bot_token=bot_token, is_active=True, is_deleted=False)
+        .filter(tg_bot_token_hash=sha256_hex(bot_token), is_active=True, is_deleted=False)
         .exists()
     )
     if already_used:

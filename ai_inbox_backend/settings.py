@@ -289,6 +289,15 @@ OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
 
 
 # ─────────────────────────────────────────────
+# MAXFIY MAYDONLARNI SHIFRLASH (apps/core/fields.py)
+# ─────────────────────────────────────────────
+# Bazadagi bot token/CRM webhook kabi maxfiy ustunlarni shifrlash uchun
+# kalit. Yaratish: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# ⚠️ Bu kalit yo'qolsa, shifrlangan ma'lumot QAYTARIB BO'LMAYDI.
+FIELD_ENCRYPTION_KEY = env("FIELD_ENCRYPTION_KEY", default="")
+
+
+# ─────────────────────────────────────────────
 # TELEGRAM
 # ─────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")

@@ -28,16 +28,45 @@ logger = logging.getLogger("apps.customers")
 # "portlashi" mumkin edi.
 _MAX_LOOKBACK_DAYS = 7
 
-_FOLLOWUP_TEMPLATES = {
-    1: {
-        "with_course": "Assalomu alaykum! {course} kursi bo'yicha savollaringiz hali ham dolzarbmi? Yordam bera olsam, mamnuniyat bilan javob beraman 😊",
-        "generic": "Assalomu alaykum! Savollaringiz bo'lsa, bemalol yozing — yordam berishdan mamnunmiz 😊",
-    },
-    2: {
-        "with_course": "Salom! {course} kursimiz hali ham qiziqtiradimi? Ro'yxatdan o'tish yoki qo'shimcha ma'lumot uchun istalgan vaqtda yozishingiz mumkin 🙌",
-        "generic": "Salom! Bizning xizmatlarimiz haligacha qiziqtiradimi? Savollaringiz bo'lsa yozing, albatta yordam beramiz 🙌",
-    },
+# ⚠️ Mijozning suhbatga qanchalik chuqur kirishiga qarab UCHTA turdagi
+# follow-up matni ishlatiladi — avval hammasi UMUMIY ("savollaringiz
+# bo'lsa yozing" kabi) bo'lgani uchun "juda oddiy"/sun'iy tuyulardi.
+# Tur AI'ning `Customer.conversation_stage`ini (har bir javobda
+# yangilanadigan, allaqachon mavjud maydon) asos qilib aniqlanadi —
+# yangi maydon/AI so'rovi kerak emas.
+#
+#  - "never_wrote"       — /start bosdi (yoki umuman yo'q), lekin AI bilan
+#                           birorta ham shaxsiy xabar almashmagan.
+#  - "engaged_no_contact" — suhbatlashdi, biror narsaga qiziqdi, lekin
+#                           hali ro'yxatdan o'tishga "tayyor" darajasiga
+#                           yetmadi.
+#  - "high_intent"        — AI mijozni yuqori xarid niyatli deb baholagan
+#                           (HIGH_INTENT/READY_TO_CONVERT/QUALIFICATION),
+#                           lekin hali ro'yxatdan o'tmagan — bu yerda CTA
+#                           tugmasi bilan ANIQROQ taklif beriladi.
+_HIGH_INTENT_STAGES = {
+    "qualification", "high_intent", "ready_to_convert",
 }
+
+
+def _determine_followup_tier(store, customer) -> str:
+    """
+    Mijozning follow-up "turi"ni aniqlaydi — pastdagi `_build_followup_text`
+    shunga qarab mos matnni tanlaydi (qarang: yuqoridagi izoh).
+    """
+    from apps.chat.models import ChatMessage
+
+    has_written = ChatMessage.objects.filter(
+        store=store, customer=customer,
+        role=ChatMessage.Role.USER, is_group_message=False,
+    ).exists()
+    if not has_written:
+        return "never_wrote"
+
+    if customer.conversation_stage in _HIGH_INTENT_STAGES:
+        return "high_intent"
+
+    return "engaged_no_contact"
 
 
 def _guess_discussed_course(store, customer) -> str | None:
@@ -75,11 +104,71 @@ def _guess_discussed_course(store, customer) -> str | None:
     return None
 
 
-def _build_followup_text(stage: int, course: str | None) -> str:
-    templates = _FOLLOWUP_TEMPLATES[stage]
-    if course:
-        return templates["with_course"].format(course=course)
-    return templates["generic"]
+def _sample_product_names(store, limit: int = 2) -> list[str]:
+    """Follow-up matnida misol sifatida ko'rsatiladigan haqiqiy kurs/xizmat nomlari."""
+    from apps.products.models import Product
+
+    return list(
+        Product.objects.filter(store=store, is_active=True).values_list("name", flat=True)[:limit]
+    )
+
+
+def _build_followup_text(tier: str, stage: int, store, course: str | None) -> str:
+    """
+    Mijozning follow-up "turi"ga (`_determine_followup_tier`) va nechanchi
+    eslatma ekaniga (1 yoki 2) qarab tabiiy, shaxsiylashtirilgan matn
+    quradi. Bitta katta .format() shablon o'rniga qismlarga bo'lib
+    quriladi — chunki ixtiyoriy qismlar (kurs nomi, misollar) bo'lmasa
+    ham grammatik jihatdan tabiiy chiqishi kerak.
+    """
+    label = "kurs" if getattr(store, "category_type", "education") == "education" else "xizmat"
+
+    if tier == "never_wrote":
+        if stage == 1:
+            examples = _sample_product_names(store)
+            examples_str = f" (masalan, {', '.join(examples)})" if examples else ""
+            return (
+                f"Salom 😊 Kecha bizning botimizga kirgandingiz. "
+                f"Sizni qaysi {label}imiz qiziqtirgandi{examples_str}? "
+                f"Yozib yuborsangiz, mos variantlarni aytib beraman."
+            )
+        return (
+            f"Salom yana bir bor 🙂 Agar hali ham {label} tanlashda "
+            f"qiynalayotgan bo'lsangiz, shunchaki nima kerakligini yozing — "
+            f"men yordam beraman."
+        )
+
+    if tier == "engaged_no_contact":
+        course_ref = f" {course} bo'yicha" if course else ""
+        if stage == 1:
+            return (
+                f"Salom 😊 Kecha{course_ref} yozgandingiz. Agar hali ham "
+                f"qiziqayotgan bo'lsangiz, sizga narxi va yaqin guruhlar "
+                f"haqida ma'lumot berib qo'yishim mumkin. Qaysi variant "
+                f"sizga qulayroq?"
+            )
+        return (
+            f"Salom!{course_ref} savolingiz hali ham dolzarbmi? "
+            f"Bemalol yozing, aniqlashtirib beraman 🙌"
+        )
+
+    # tier == "high_intent" — mijoz allaqachon aniq qiziqish bildirgan,
+    # shuning uchun CTA ochiqroq. Mijoz ALLAQACHON shaxsiy chatda bo'lgani
+    # uchun tashqi havola shart emas — to'g'ridan-to'g'ri ism/raqam
+    # so'raladi (AI keyingi javobda buni odatdagidek lidga aylantiradi).
+    course_ref = f" {course} bo'yicha" if course else ""
+    if stage == 1:
+        return (
+            f"Salom! 😊 Kecha{course_ref} gaplashgandik. Agar xohlasangiz, "
+            f"sizga mos guruhni aniqlab beramiz — buning uchun ismingiz va "
+            f"telefon raqamingizni yozib qoldirsangiz, administratorimiz "
+            f"siz bilan bog'lanadi."
+        )
+    return (
+        f"Yana bir bor salom! Joylar tez to'lib qolishi mumkin — agar hali "
+        f"ham qiziqsangiz, ismingiz va raqamingizni yozib qoldiring, "
+        f"administratorimiz bog'lanadi 🙌"
+    )
 
 
 def _send_followup_to_customer(store, customer, stage: int) -> bool:
@@ -87,8 +176,9 @@ def _send_followup_to_customer(store, customer, stage: int) -> bool:
     from apps.chat.models import ChatMessage
     from apps.chat.senders import send_reply
 
+    tier = _determine_followup_tier(store, customer)
     course = _guess_discussed_course(store, customer)
-    text = _build_followup_text(stage, course)
+    text = _build_followup_text(tier, stage, store, course)
 
     sent = send_reply(
         store=store,
@@ -121,10 +211,13 @@ def _process_stage(store, stage: int, delay_hours: int, now, lookback_cutoff) ->
     # ⚠️ Faqat: (a) hali Lead bermagan mijozlar — Lead allaqachon bergan
     # mijoz bilan operator o'zi bog'lanadi, ikkinchi marta avtomatik
     # xabar yuborish ortiqcha va spam bo'lardi; (b) AI hali faol (inson
-    # operatorga o'tkazilmagan); (c) bloklanmagan.
+    # operatorga o'tkazilmagan); (c) bloklanmagan; (d) avvalgi follow-up'ga
+    # ANIQ rad javobi bermagan — "yo'q" degan mijozga яна eslatma yuborish
+    # spam bo'lardi (apps/webhooks/tasks.py'da aniqlanadi/belgilanadi).
     candidates = Customer.objects.filter(
         store=store,
         follow_up_stage=prev_stage,
+        follow_up_declined=False,
         ai_active=True,
         is_blocked=False,
         last_message_at__gte=lookback_cutoff,

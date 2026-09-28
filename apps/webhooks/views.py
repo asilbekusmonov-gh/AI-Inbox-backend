@@ -536,8 +536,13 @@ class TelegramWebhookView(View):
             return cached
 
         try:
+            # ⚠️ tg_bot_token endi shifrlangan — to'g'ridan-to'g'ri qidirib
+            # bo'lmaydi, shuning uchun hash ustuni orqali qidiramiz
+            # (apps/core/fields.py, apps/stores/models.py Store.save()).
+            from apps.core.fields import sha256_hex
+
             store = Store.objects.select_related("owner").filter(
-                tg_bot_token=bot_token,
+                tg_bot_token_hash=sha256_hex(bot_token),
                 is_active=True,
                 is_deleted=False,
             ).order_by("-updated_at", "-created_at").first()

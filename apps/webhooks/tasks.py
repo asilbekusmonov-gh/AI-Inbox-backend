@@ -182,6 +182,57 @@ def _send_command_reply(store, customer, platform, chat_id, text, parse_mode="HT
     return sent
 
 
+# ⚠️ Follow-up eslatmasidan keyingi mijoz javobini arzon (AI so'rovisiz)
+# tasniflash uchun — mijoz shunchaki "yo'q" desa, buni AI'ga yuborib
+# to'liq javob yozdirish token isrofi. Faqat QISQA, deyarli faqat shu
+# so'zlardan iborat xabarlarda ishlaydi (uzun/tarkibli xabar hech qachon
+# "rad javobi" deb belgilanmaydi — noto'g'ri bloklab qo'yish xavfi yo'q).
+_DECLINE_PHRASES = {
+    "yo'q", "yoq", "yo'q rahmat", "yoq rahmat", "yo'q kerak emas",
+    "kerak emas", "kerakmas", "hozircha kerak emas", "hozir kerak emas",
+    "hozircha emas", "qiziqmayman", "shart emas", "rahmat kerak emas",
+    "yo'q rahmat kerak emas", "unutdim", "kechirasiz kerak emas",
+    "нет", "не надо", "не нужно", "нет спасибо", "не хочу", "спасибо не надо",
+    "no", "not interested", "no thanks",
+}
+
+# Follow-up'dan keyin (yoki rad etilgandan keyin) mijoz YANGI xabar
+# yozganda, bu "haqiqiy qiziqish"mi yoki shunchaki bekorchi/nazokat
+# xabarimi ("ha", "rahmat", "😂") ekanini arzon aniqlash uchun.
+_INTEREST_KEYWORDS = (
+    "narx", "qancha", "necha pul", "qiziq", "ro'yxat", "royxat", "yozil",
+    "qachon", "qayerda", "manzil", "bormi", "bor mi", "haqida", "malumot",
+    "ma'lumot", "qanaqa", "qanday", "kurs", "guruh", "sinov", "necha kun",
+    "necha soat", "necha oy", "narxi", "narxlar",
+)
+
+
+def _looks_like_decline(text: str) -> bool:
+    """Mijozning xabari follow-up'ga aniq "yo'q/kerak emas" javobimi?"""
+    normalized = text.strip().lower().strip(" .,!?😊🙂🙁👍👎✅")
+    return normalized in _DECLINE_PHRASES
+
+
+def _looks_like_genuine_interest(text: str, store) -> bool:
+    """
+    `follow_up_declined=True` bo'lgan mijozning YANGI xabari haqiqiy
+    qiziqishni bildiradimi (AI qayta ishga tushirilishi kerakmi), yoki
+    shunchaki bekorchi/nazokat xabarmi (jim qolinadi, token tejaladi)?
+    """
+    normalized = text.strip().lower()
+    if len(normalized) < 3:
+        return False
+    if "?" in normalized:
+        return True
+    if any(kw in normalized for kw in _INTEREST_KEYWORDS):
+        return True
+
+    from apps.products.models import Product
+
+    product_names = Product.objects.filter(store=store, is_active=True).values_list("name", flat=True)
+    return any(name and name.lower() in normalized for name in product_names)
+
+
 @shared_task(
     bind=True,
     name="apps.webhooks.tasks.process_incoming_message",
@@ -804,9 +855,14 @@ def process_incoming_message(
                 f"[Task] Mijoz allaqachon so'nggi {_ALREADY_LEAD_COOLDOWN_HOURS} soat ichida lid "
                 f"bo'lgan — AI chaqirilmadi | store={store.name} | customer={customer.id}"
             )
+            # ⚠️ Bu xabar mijoz ro'yxatdan o'tgandan keyin YUBORGAN har
+            # qanday xabarga (hatto shunchaki "rahmat" desa ham) darhol
+            # qaytariladi — shuning uchun ohangi "kechirim so'rayotgandek"
+            # emas, iliq/tabiiy bo'lishi kerak (foydalanuvchi jonli
+            # tekshirib, avvalgi matn juda "quruq" tuyulganini aniqladi).
             _send_command_reply(
                 store, customer, platform, chat_id,
-                text="🙌 Siz allaqachon ro'yxatdan o'tgansiz — operatorlarimiz tez orada siz bilan bog'lanadi!",
+                text="Siz allaqachon ro'yxatdan o'tdingiz 😊 Iltimos, kutib turing — sizga tez orada bog'lanamiz!",
                 is_group_message=is_group,
                 reply_to_message_id=message_id if is_group else None,
             )
@@ -814,6 +870,46 @@ def process_incoming_message(
                 processing_status=ChatMessage.ProcessingStatus.COMPLETED
             )
             return
+
+        # ── 4.85. Follow-up eslatmasidan keyingi javobni tekshirish ────
+        # (faqat shaxsiy chatdagi HAQIQIY mijozlar uchun — egasi/xodim
+        # o'z botini sinab ko'rayotganda bu mantiq umuman aralashmasligi
+        # kerak). Maqsad: mijoz eslatmaga aniq "yo'q" desa, AI'ni
+        # chaqirmasdan arzon statik javob berish (token tejash) va
+        # keyingi bekorchi xabarlarga ham jim qolish — TO mijoz haqiqiy
+        # qiziqish bildirmaguncha.
+        if not is_group and not is_admin:
+            if customer.follow_up_declined:
+                if not _looks_like_genuine_interest(text, store):
+                    logger.info(
+                        f"[Task] Follow-up rad etilgan, bekorchi xabar — AI chaqirilmadi | "
+                        f"store={store.name} | customer={customer.id}"
+                    )
+                    ChatMessage.objects.filter(id=chat_message.id).update(
+                        processing_status=ChatMessage.ProcessingStatus.COMPLETED
+                    )
+                    return
+                # Qayta haqiqiy qiziqish bildirdi — oddiy AI oqimi davom etadi.
+                Customer.objects.filter(id=customer.id).update(follow_up_declined=False)
+                customer.follow_up_declined = False
+
+            elif customer.follow_up_stage > 0 and _looks_like_decline(text):
+                logger.info(
+                    f"[Task] Follow-up'ga rad javobi — AI chaqirilmadi | "
+                    f"store={store.name} | customer={customer.id}"
+                )
+                _send_command_reply(
+                    store, customer, platform, chat_id,
+                    text="Xop, tushunarli 😊 Agar keyinroq qiziqsangiz, istalgan vaqtda yozishingiz mumkin!",
+                )
+                Customer.objects.filter(id=customer.id).update(
+                    follow_up_stage=0, follow_up_last_sent_at=None,
+                    follow_up_declined=True, last_message_at=_tz.now(),
+                )
+                ChatMessage.objects.filter(id=chat_message.id).update(
+                    processing_status=ChatMessage.ProcessingStatus.COMPLETED
+                )
+                return
 
         # ── 4.9. Bir xil mijozning suhbatini ikkita worker BIR VAQTDA
         # qayta ishlamasligi uchun qulf (lock) ──────────────────────────
@@ -1158,6 +1254,11 @@ def process_incoming_message(
                 last_message_at=timezone.now(),
                 follow_up_stage=0,
                 follow_up_last_sent_at=None,
+                # ⚠️ Mijoz to'liq AI oqimidan o'tib javob oldi — demak
+                # (yuqoridagi 4.85-bosqichda tekshirilmagan bo'lsa ham)
+                # aktiv ravishda qatnashmoqda, "rad etgan" holati endi
+                # eskirgan bo'lardi.
+                follow_up_declined=False,
             )
 
             logger.info(

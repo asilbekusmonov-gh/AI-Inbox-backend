@@ -95,6 +95,19 @@ class Customer(BaseModel):
             "ikkala bosqich birdaniga yuborilib ketishi mumkin edi."
         )
     )
+    follow_up_declined = models.BooleanField(
+        default=False,
+        help_text=(
+            "Mijoz follow-up eslatmasiga aniq rad javobi berganmi "
+            "(masalan 'yo'q', 'kerak emas')? True bo'lsa: (1) keyingi "
+            "avtomatik follow-up bosqichlari yuborilmaydi (spam bo'lmasin "
+            "uchun), (2) mijoz keyingi bekorchi xabarlariga AI javob "
+            "bermaydi (token tejash uchun) — TO'ki mijoz haqiqiy qiziqish "
+            "bildirmaguncha (shunda avtomatik False'ga qaytadi va AI "
+            "odatdagidek javob beradi). apps/webhooks/tasks.py'da "
+            "boshqariladi."
+        )
+    )
     ai_active = models.BooleanField(
         default=True,
         help_text="Ushbu mijoz uchun AI bot faolmi? False bo'lsa operator qo'lda javob beradi"
