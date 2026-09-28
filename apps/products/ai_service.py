@@ -238,9 +238,52 @@ def analyze_product_file(
         f"{context}"
     )
 
-    file_part = {"mime_type": mime_type, "data": file_bytes}
+    # ⚠️ BUG FIX (jonli holatda aniqlangan): `{"mime_type": ..., "data":
+    # file_bytes}` (xom lug'at/dict) ko'rinishidagi "inline blob" bu SDK
+    # versiyasida SUDRALIB ishlar edi — xato bermasdan, lekin har safar
+    # 40+ soniya osilib, `DeadlineExceeded` bilan qulardi (matnli so'rovlar
+    # esa ~10 soniyada tugaydi). Rasm uchun to'g'ri, tezkor yo'l — `PIL.Image`
+    # ob'ektining o'zini yuborish (tasdiqlandi: ~11 soniyada, to'g'ri natija
+    # bilan). Matn uchun esa umuman "blob" kerak emas — to'g'ridan-to'g'ri
+    # promptga qo'shiladi, bu ham tezroq va ishonchliroq.
+    uploaded_file = None  # faqat PDF yo'lida ishlatiladi, javobdan keyin tozalanadi
 
-    response = model.generate_content([file_part, prompt], request_options={"timeout": 40})
+    if mime_type.startswith("image/"):
+        from PIL import Image
+        import io as _io
+
+        contents = [Image.open(_io.BytesIO(file_bytes)), prompt]
+    elif mime_type == "text/plain":
+        try:
+            file_text = file_bytes.decode("utf-8", errors="ignore")
+        except Exception:
+            file_text = ""
+        contents = [f"{prompt}\n\nFayl matni:\n{file_text}"]
+    else:
+        # application/pdf — Gemini File API orqali yuklanadi (SDK'ning
+        # katta/hujjat fayllar uchun rasmiy tavsiya qilingan yo'li).
+        # ⚠️ Yuklangan fayl javob OLINGUNCHA o'chirilmasligi kerak — shu
+        # sabab tozalash pastda, `generate_content` dan KEYIN, `finally`da.
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
+            tmp.write(file_bytes)
+            tmp.flush()
+            uploaded_file = genai.upload_file(path=tmp.name, mime_type=mime_type)
+        contents = [uploaded_file, prompt]
+
+    try:
+        # ⚠️ Rasm/PDF tahlili matnli so'rovlarga qaraganda sezilarli sekinroq
+        # va vaqti beqaror (jonli testda 11s dan 40s gacha o'zgardi) — shu
+        # sabab boshqa Gemini chaqiruvlaridan (odatda 25s) kattaroq muhlat.
+        response = model.generate_content(contents, request_options={"timeout": 60})
+    finally:
+        if uploaded_file is not None:
+            try:
+                genai.delete_file(uploaded_file.name)
+            except Exception:
+                pass
+
     text = (response.text or "").strip()
     if not text:
         raise ValueError("Gemini bo'sh javob qaytardi")

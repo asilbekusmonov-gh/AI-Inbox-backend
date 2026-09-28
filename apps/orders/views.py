@@ -215,7 +215,22 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
             created_at__gte=timezone.now() - timezone.timedelta(days=7),
         ).aggregate(avg=Avg("latency_ms"))["avg"]
         avg_response_time_seconds = round(avg_latency_ms / 1000, 1) if avg_latency_ms else None
-        interactions_total = Customer.objects.filter(store=target_store, is_deleted=False).count()
+
+        # ⚠️ BUG FIX (jonli holatda aniqlangan): do'kon egasi o'z botini
+        # sinab ko'rish uchun unga yozganda (masalan /start), bu ham oddiy
+        # Customer yozuvi sifatida saqlanadi — natijada "Qiziqish
+        # bildirganlar" sonida EGANING O'ZI "mijoz" sifatida hisoblanib
+        # qolgan edi (egasi "hali hech kim yozmagan-ku, nega 1 ta
+        # ko'rsatilyapti" deb aniq ta'kidladi). Statistika FAQAT haqiqiy
+        # mijozlarni aks ettirishi kerak, shuning uchun egasining
+        # `tg_owner_chat_id`siga mos Customer voronkaning HAR bosqichidan
+        # (jami, oylik) chetlab o'tiladi.
+        owner_chat_id = target_store.tg_owner_chat_id
+        customers_qs = Customer.objects.filter(store=target_store, is_deleted=False)
+        if owner_chat_id:
+            customers_qs = customers_qs.exclude(platform_user_id=owner_chat_id)
+
+        interactions_total = customers_qs.count()
 
         # ⚠️ Do'kon egasi aniq voronka (funnel) so'radi: "nechta kishi
         # /start bosdi (=interactions_total), nechtasi HAQIQIY muloqot
@@ -241,8 +256,7 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
         # ham hisobga oladi) ishlatiladi; pastdagi oylik taqsimot ham
         # muvofiqlik uchun xuddi shunday `ChatMessage.all_objects`dan
         # foydalanadi.
-        conversed_total = Customer.objects.filter(
-            store=target_store, is_deleted=False,
+        conversed_total = customers_qs.filter(
             messages__role=ChatMessage.Role.ASSISTANT,
             messages__message_id__startswith="ai_resp_",
         ).distinct().count()
@@ -288,7 +302,7 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
         # ham (interactions_total/conversed_total) ishlatilgan "o'ziga
         # xos mijozlar soni" mantig'iga mos kelishi uchun.
         interactions_monthly_counts = (
-            Customer.objects.filter(store=target_store, is_deleted=False, created_at__gte=store_start)
+            customers_qs.filter(created_at__gte=store_start)
             .annotate(month=TruncMonth("created_at"))
             .values("month")
             .annotate(count=Count("id"))
@@ -296,10 +310,13 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
         interactions_monthly_map = {row["month"].strftime("%Y-%m"): row["count"] for row in interactions_monthly_counts}
 
         from django.db.models import Min as _Min
+        conversed_first_dates_qs = ChatMessage.all_objects.filter(
+            store=target_store, role=ChatMessage.Role.ASSISTANT, message_id__startswith="ai_resp_",
+        )
+        if owner_chat_id:
+            conversed_first_dates_qs = conversed_first_dates_qs.exclude(customer__platform_user_id=owner_chat_id)
         conversed_first_dates = (
-            ChatMessage.all_objects.filter(
-                store=target_store, role=ChatMessage.Role.ASSISTANT, message_id__startswith="ai_resp_",
-            )
+            conversed_first_dates_qs
             .values("customer_id")
             .annotate(first_conversed=_Min("created_at"))
         )

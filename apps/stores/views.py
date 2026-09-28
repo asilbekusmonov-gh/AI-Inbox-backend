@@ -343,6 +343,27 @@ class TelegramBotConnectView(APIView):
             )
 
 
+class TelegramBotDisconnectView(APIView):
+    """
+    Do'kon egasining shaxsiy Telegram botini uzish — do'kon umumiy demo
+    botga qaytadi.
+
+    DELETE /api/v1/store/telegram/disconnect-bot/
+    Response: {"success": true}
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request):
+        store = get_store_from_request(request)
+        if not store:
+            return Response({"error": "Do'kon topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        from apps.stores.services import disconnect_telegram_bot_from_store
+
+        result = disconnect_telegram_bot_from_store(store)
+        return Response(result, status=status.HTTP_200_OK)
+
+
 class TelegramGroupDisconnectView(APIView):
     """
     Do'kondan bog'langan Telegram guruhini uzish (egasi tasodifan

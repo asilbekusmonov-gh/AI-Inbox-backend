@@ -76,6 +76,21 @@ class TelegramWebhookView(View):
         # 3. Do'konni bot_token orqali topamiz (bot haqiqiy va faolligini tekshirish uchun)
         token_store = self._get_store_by_token(bot_token)
         if not token_store:
+            # ⚠️ Do'kon egasi shaxsiy botini ulagandan keyin (Sozlamalar →
+            # "Bot ulash"), bu umumiy bot endi o'sha do'konga UMUMAN
+            # tegishli emas. Lekin agar do'kon egasi ULASHDAN OLDIN
+            # bio/target'da ushbu umumiy botga yo'naltiruvchi eski havolani
+            # (masalan "?start=store_<uuid>") allaqachon tarqatgan bo'lsa,
+            # o'sha eski havola bosilganda mijoz hech qanday javobsiz
+            # (sukut) qolib ketardi — foydalanuvchi buni aniq ta'kidladi.
+            # Shu sabab: bu FAQAT umumiy (master) bot bo'lsa, xabar ichidan
+            # deep-link'ni sinab ko'ramiz — agar u ANIQ shu do'konga tegishli
+            # bo'lib, do'kon ENDI o'z botiga o'tgan bo'lsa, mijozni
+            # avtomatik yangi botga yo'naltiramiz (havola singan bo'lib
+            # qolmaydi).
+            if bot_token == getattr(settings, "TELEGRAM_BOT_TOKEN", ""):
+                if self._redirect_to_own_bot_if_moved(bot_token, payload):
+                    return HttpResponse(status=200)
             logger.warning(
                 f"Telegram: do'kon topilmadi | token: {bot_token[:10]}..."
             )
@@ -346,6 +361,13 @@ class TelegramWebhookView(View):
         # botning ichki texnik nomini ochib qo'yardi (do'kon egasi buni
         # o'z-o'ziga tegishli, "oq nishonli" yechim sifatida ko'rsatishni
         # xohlaydi). Endi shunchaki umumiy "botni" so'zi ishlatiladi.
+        # ⚠️ BUG FIX: matn "@LeadNodeBot" o'rniga "LeadNode" so'zini qattiq
+        # yozib qo'ygan edi — bu ham xuddi shu muammo: do'kon egasi O'Z
+        # shaxsiy botini (white-label, "Sozlamalar → Bot ulash") ulagan
+        # bo'lsa ham, tasdiqlash xabari hamon "LeadNode ulandi" deb
+        # yozardi — bu uning O'Z boti emas, uchinchi tomon mahsuloti
+        # qo'shilgandek taassurot qoldirardi (foydalanuvchi aniq
+        # ta'kidladi). Endi bu yerda ham faqat umumiy "Bot" so'zi.
         # ⚠️ BUG FIX: avval bu yerda "A'zolar botni belgilab yoki
         # xabariga javob (reply) berib savol bersa..." deyilardi — bu
         # do'kon egasi/menejerlarda "bot FAQAT belgilansa ishlaydi" degan
@@ -362,7 +384,7 @@ class TelegramWebhookView(View):
             bot_token=bot_token,
             chat_id=chat_id,
             text=(
-                f"✅ <b>LeadNode</b> ushbu guruhga muvaffaqiyatli ulandi — endi <b>{store.name}</b> uchun ishlaydi!\n\n"
+                f"✅ <b>Bot</b> ushbu guruhga muvaffaqiyatli ulandi — endi <b>{store.name}</b> uchun ishlaydi!\n\n"
                 f"A'zolar kurs/xizmat haqida savol yozsa, AI sotuvchi shu yerda avtomatik javob beradi — "
                 f"botni belgilash yoki xabariga javob (reply) berish shart emas."
             ),
@@ -553,6 +575,67 @@ class TelegramWebhookView(View):
             logger.error(f"Do'konni topishda xato: {e}", exc_info=True)
             return None
 
+    def _redirect_to_own_bot_if_moved(self, master_bot_token: str, payload: dict) -> bool:
+        """
+        Umumiy (master) botga "/start store_<uuid>" yoki "/start admin_<uuid>"
+        deep-link bilan kirilgan, lekin o'sha do'kon ALLAQACHON o'z shaxsiy
+        botiga o'tgan bo'lsa — mijozni yangi botga yo'naltiruvchi xabar
+        yuboradi (eski, bio/target'da tarqatilgan havola "singan" bo'lib
+        qolmasligi uchun).
+
+        Returns:
+            True — yo'naltirish xabari yuborildi (chaqiruvchi shu bilan to'xtaydi)
+            False — bu holat emas (odatdagi "begona foydalanuvchi" oqimi davom etadi)
+        """
+        try:
+            message_data = payload.get("message") or payload.get("edited_message") or {}
+            text = (message_data.get("text") or "").strip()
+            chat = message_data.get("chat") or {}
+            chat_id = chat.get("id")
+            if not text.startswith("/start") or not chat_id:
+                return False
+
+            parts = text.split()
+            if len(parts) < 2:
+                return False
+            param = parts[1].strip()
+
+            target_key = param
+            for prefix in ("admin_", "store_"):
+                if param.startswith(prefix):
+                    target_key = param[len(prefix):]
+                    break
+
+            try:
+                target_store = Store.objects.filter(
+                    id=target_key, is_active=True, is_deleted=False,
+                ).first()
+            except Exception:
+                return False
+
+            if not target_store or not target_store.has_own_bot or not target_store.tg_bot_username:
+                return False
+
+            new_link = f"https://t.me/{target_store.tg_bot_username}?start={param}"
+            from apps.chat.senders import send_telegram_message
+
+            send_telegram_message(
+                bot_token=master_bot_token,
+                chat_id=chat_id,
+                text=(
+                    f"👋 Salom! <b>{target_store.name}</b> endi yangi bot orqali ishlaydi. "
+                    f"Iltimos, quyidagi havola orqali davom eting:\n\n"
+                    f'<a href="{new_link}">{target_store.name} botiga o\'tish</a>'
+                ),
+            )
+            logger.info(
+                f"Telegram: eski umumiy bot havolasi yangi shaxsiy botga yo'naltirildi | "
+                f"store={target_store.name} | chat_id={chat_id}"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Eski havolani yangi botga yo'naltirishda xato: {e}", exc_info=True)
+            return False
 
     def _is_duplicate(self, store_id, message: IncomingMessage, bot_token: str) -> bool:
         """Idempotency: bu xabar avval qayta ishlanganmi?"""

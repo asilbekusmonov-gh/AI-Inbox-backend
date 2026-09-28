@@ -485,13 +485,59 @@ def connect_telegram_bot_to_store(store, bot_token: str) -> dict:
         raise ValueError(f"Telegram webhook o'rnatib bo'lmadi: {res_data.get('description', 'noma`lum xato')}")
 
     # ── 3. Store'ga saqlash ────────────────────────────────────
+    # ⚠️ BUG FIX (jonli qo'lda testda topildi): `update_fields`ga
+    # `tg_bot_token_hash` kiritilmagani uchun, `Store.save()` uni
+    # xotirada hisoblasa ham, Django buni HAQIQIY UPDATE so'roviga
+    # umuman qo'shmasdi — natijada baza ustunida hamon eski/bo'sh
+    # qiymat qolib, webhook marshrutlash (`_get_store_by_token`) va
+    # "bu token band" tekshiruvi ISHLAMAY qolgan edi.
     store.tg_bot_token = bot_token
     store.tg_bot_username = bot_username
-    store.save(update_fields=["tg_bot_token", "tg_bot_username", "updated_at"])
+    store.save(update_fields=["tg_bot_token", "tg_bot_token_hash", "tg_bot_username", "updated_at"])
 
     logger.info(f"[Telegram Bot Connect] Muvaffaqiyatli ulandi: store={store.name} | bot=@{bot_username}")
 
     return {"success": True, "bot_username": bot_username}
+
+
+def disconnect_telegram_bot_from_store(store) -> dict:
+    """
+    Do'kon egasining shaxsiy Telegram botini uzadi — do'kon umumiy demo
+    botga qaytadi (mijozlar/TWA yana `TELEGRAM_BOT_TOKEN` orqali ishlaydi).
+
+    Bot O'ZI (Telegram tomonida) o'chirilmaydi/o'zgartirilmaydi — faqat
+    shu do'kon bilan bog'lanishi uziladi, va o'sha bot tokenining
+    webhook'i tozalanadi (aks holda o'sha botga yozgan haqiqiy odamlar
+    endi hech kimga tegishli bo'lmagan "jim" botga xabar yuborishda
+    davom etib, hech qanday javob ololmay qolardi — ular buni tushunishi
+    qiyin bo'lardi).
+
+    Args:
+        store: Store obyekti (uzadigan do'kon)
+
+    Returns:
+        {"success": True}
+    """
+    old_token = store.tg_bot_token
+    if not old_token:
+        return {"success": True}
+
+    # ⚠️ Webhook'ni tozalash — xato bo'lsa ham uzishning o'zini
+    # to'xtatmaydi (masalan bot allaqachon o'chirilgan/bloklangan bo'lsa
+    # ham, do'kon bazada baribir muvaffaqiyatli uzilishi kerak).
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            client.post(f"{TELEGRAM_API_BASE}{old_token}/deleteWebhook")
+    except httpx.RequestError as e:
+        logger.warning(f"[Telegram Bot Disconnect] Webhook tozalab bo'lmadi (davom etiladi): {e}")
+
+    store.tg_bot_token = None
+    store.tg_bot_username = None
+    store.save(update_fields=["tg_bot_token", "tg_bot_token_hash", "tg_bot_username", "updated_at"])
+
+    logger.info(f"[Telegram Bot Disconnect] Uzildi: store={store.name}")
+
+    return {"success": True}
 
 
 # ─────────────────────────────────────────────────────────────
