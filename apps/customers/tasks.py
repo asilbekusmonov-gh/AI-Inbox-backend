@@ -223,6 +223,13 @@ def _process_stage(store, stage: int, delay_hours: int, now, lookback_cutoff) ->
         last_message_at__gte=lookback_cutoff,
     ).exclude(leads__isnull=False)
 
+    # ⚠️ Do'kon egasi o'z botini sinab ko'rish uchun yozib qo'yishi mumkin —
+    # bu "mijoz" emas, shuning uchun unga avtomatik follow-up yuborilmasligi
+    # kerak (xuddi shu bug klassi apps/orders/views.py'da LeadViewSet.stats'da
+    # ham topilgan va tuzatilgan edi).
+    if store.tg_owner_chat_id:
+        candidates = candidates.exclude(platform_user_id=store.tg_owner_chat_id)
+
     if stage == 1:
         # 1-bosqich — mijozning ASL sukut vaqtidan (oxirgi xabaridan) hisoblanadi.
         candidates = candidates.filter(last_message_at__lte=threshold)
