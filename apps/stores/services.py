@@ -484,6 +484,25 @@ def connect_telegram_bot_to_store(store, bot_token: str) -> dict:
     if not res_data.get("ok"):
         raise ValueError(f"Telegram webhook o'rnatib bo'lmadi: {res_data.get('description', 'noma`lum xato')}")
 
+    # ── 2.5. Buyruqlar menyusi (/ bosganda chiqadigan "/start", "/help") ──
+    # ⚠️ `setup_bot` management command bu menyuni faqat UMUMIY (master)
+    # bot uchun o'rnatardi — har bir do'konning o'z shaxsiy boti bu yerda,
+    # ulanish paytida hech qachon o'rnatilmagan edi, shuning uchun "/"
+    # bossa hech narsa taklif qilinmasdi (jonli holatda aniqlandi). Xato
+    # bo'lsa ham ulanishni butunlay bekor qilmaymiz — webhook allaqachon
+    # muvaffaqiyatli, bu shunchaki qulaylik.
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            client.post(
+                f"{TELEGRAM_API_BASE}{bot_token}/setMyCommands",
+                json={"commands": [
+                    {"command": "start", "description": "Botni ishga tushirish"},
+                    {"command": "help", "description": "Yordam va ko'rsatmalar"},
+                ]},
+            )
+    except httpx.RequestError as e:
+        logger.warning(f"[Telegram Bot Connect] Buyruqlar menyusini o'rnatib bo'lmadi: store={store.name} | {e}")
+
     # ── 3. Store'ga saqlash ────────────────────────────────────
     # ⚠️ BUG FIX (jonli qo'lda testda topildi): `update_fields`ga
     # `tg_bot_token_hash` kiritilmagani uchun, `Store.save()` uni

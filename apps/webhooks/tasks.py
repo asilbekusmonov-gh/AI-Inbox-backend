@@ -600,8 +600,8 @@ def process_incoming_message(
                     # qisqartirishni so'radi, oddiy va tabiiy salomlashuv
                     # yetarli.
                     customer_text = (
-                        f"<b>Assalomu alaykum! {store.name} rasmiy botiga xush kelibsiz! 😊</b>\n\n"
-                        f"Qanday savolingiz bor?"
+                        f"<b>Assalomu alaykum! {store.name} xizmatiga xush kelibsiz! 😊</b>\n\n"
+                        f"Sizga qanday yordam bera olaman?"
                     )
                     _send_command_reply(
                         store, customer, platform, chat_id,
@@ -809,6 +809,22 @@ def process_incoming_message(
             )
             return
 
+        # ── 4.6.5. Bloklangan mijozni tekshirish ────────────────────────
+        # ⚠️ XAVFSIZLIK: avval `is_blocked` bevosita HECH QAYERDA
+        # tekshirilmas edi — bloklash faqat `toggle_block`ning yon
+        # ta'siri (u ham `ai_active=False` qilib qo'yishi) orqali
+        # ISHLAB TURARDI. Agar kelajakda kimdir alohida "toggle-ai"
+        # endpointi orqali shu mijozning `ai_active`sini QAYTA yoqsa
+        # (blokdan mustaqil ravishda), blok SOQIR (no-op) bo'lib
+        # qolardi — mijoz hali `is_blocked=True` bo'lsa ham AI yana
+        # javob bera boshlardi. Endi mustaqil, aniq tekshiruv.
+        if getattr(customer, "is_blocked", False):
+            logger.info(f"[Task] Bloklangan mijozdan xabar — javob berilmadi | store={store.name} | customer={customer}")
+            ChatMessage.objects.filter(id=chat_message.id).update(
+                processing_status=ChatMessage.ProcessingStatus.COMPLETED
+            )
+            return
+
         # ── 4.7. AI bot faolligini tekshirish (Global yoki Handoff) ─────
         if not store.ai_active or not getattr(customer, "ai_active", True):
             logger.info(
@@ -980,10 +996,11 @@ def process_incoming_message(
                         if ai_response.error_type == "quota":
                             owner_text = (
                                 "🚨 <b>AI TO'XTAB QOLDI — kunlik so'rov limiti tugadi!</b>\n\n"
-                                "Gemini AI'ning bepul kunlik limiti tugagani sabab, bot hozir "
+                                "Gemini AI'ning kunlik so'rov limiti tugagani sabab, bot hozir "
                                 "mijozlarga AVTOMATIK javob berolmayapti. Mijozlarning xabarlari "
                                 "TWA Inbox'da saqlanmoqda — hozircha qo'lda javob bering.\n\n"
-                                "Doimiy hal qilish uchun: Google AI Studio'da pulli rejaga o'ting."
+                                "Bu muammo tez-tez takrorlansa: Google AI Studio/Cloud Console'dagi "
+                                "kvota sozlamalaringizni tekshiring."
                             )
                         else:
                             owner_text = (

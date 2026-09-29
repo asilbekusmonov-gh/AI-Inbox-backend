@@ -240,7 +240,15 @@ class Store(BaseModel):
         help_text="Obuna rejasi"
     )
     monthly_message_limit = models.IntegerField(
-        default=500,
+        # ⚠️ Avval 500 edi — jonli yuklama-testda eng katta simulyatsiya
+        # qilingan biznes (300 mijoz/oy) o'zi ~1000-1200 ta AI chaqiruvi
+        # yaratgani aniqlandi, ya'ni haqiqatan muvaffaqiyatli biznes shu
+        # "bepul sinov oyi" davomida o'rtada AI'siz qolib ketardi. Gemini
+        # narxi arzon bo'lgani uchun (taxminan $0.001-0.003/xabar) 5000ga
+        # oshirildi — bu eng og'ir simulyatsiyadan ham ~4x yuqori (real
+        # biznes sezmaydi), lekin hali ham chinakam nosozlik/suiiste'mol
+        # holatlarini ushlab qoladigan chekli qiymat (cheksiz emas).
+        default=5000,
         help_text="Oylik maksimal xabar soni (tarif chegarasi)"
     )
     is_active = models.BooleanField(
