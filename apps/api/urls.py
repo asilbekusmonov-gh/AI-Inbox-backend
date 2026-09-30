@@ -24,7 +24,13 @@ from drf_spectacular.views import (
     SpectacularRedocView,
 )
 
-from apps.stores.views import SuperAdminStatsView, SuperAdminMeView, SuperAdminBusinessListCreateView
+from apps.stores.views import (
+    SuperAdminStatsView,
+    SuperAdminMeView,
+    SuperAdminBusinessListCreateView,
+    SuperAdminTelegramLoginView,
+    SuperAdminTelegramLogoutView,
+)
 from apps.webhooks.views import webhook_health
 
 app_name = "api_v1"
@@ -49,5 +55,7 @@ urlpatterns = [
     path("superadmin/stats/", SuperAdminStatsView.as_view(), name="superadmin_stats"),
     path("superadmin/me/", SuperAdminMeView.as_view(), name="superadmin_me"),
     path("superadmin/businesses/", SuperAdminBusinessListCreateView.as_view(), name="superadmin_businesses"),
+    path("superadmin/telegram-login/", SuperAdminTelegramLoginView.as_view(), name="superadmin_telegram_login"),
+    path("superadmin/telegram-logout/", SuperAdminTelegramLogoutView.as_view(), name="superadmin_telegram_logout"),
 ]
 

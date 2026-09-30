@@ -212,6 +212,113 @@ class SuperAdminStatsView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+def _extract_tg_admin_chat_id(username: str) -> str | None:
+    """`"tg_admin_<chat_id>"` formatidagi username'dan chat_id'ni ajratib oladi — bo'lmasa `None`."""
+    prefix = "tg_admin_"
+    if username.startswith(prefix):
+        return username[len(prefix):]
+    return None
+
+
+class SuperAdminTelegramLoginView(APIView):
+    """
+    Super Admin panelga LeadNode bot orqali (Telegram WebApp initData bilan)
+    kirish — login+parol o'rniga QO'SHIMCHA (zaxira sifatida parol ham
+    ishlaydi) qulay usul.
+    POST /api/v1/superadmin/telegram-login/  body: {"init_data": "..."}
+
+    Xavfsizlik: faqat `settings.SUPERADMIN_TG_CHAT_IDS` ro'yxatidagi
+    Telegram chat_id'lar (imzosi MASTER bot tokeni bilan tasdiqlangan
+    initData orqali) kira oladi — bu ro'yxat biror Store egaligidan
+    MUSTAQIL, faqat platforma xodimlari uchun.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        import json
+        from urllib.parse import unquote
+
+        from django.conf import settings
+        from django.contrib.auth.models import User
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        from apps.core.authentication import TelegramInitDataAuthentication
+
+        init_data = request.data.get("init_data", "")
+        if not init_data:
+            return Response({"error": "initData berilmagan"}, status=status.HTTP_400_BAD_REQUEST)
+
+        parsed = {}
+        for part in init_data.split("&"):
+            if "=" in part:
+                key, _, value = part.partition("=")
+                parsed[key] = unquote(value)
+
+        received_hash = parsed.pop("hash", None)
+        if not received_hash:
+            return Response({"error": "initData'da 'hash' topilmadi"}, status=status.HTTP_400_BAD_REQUEST)
+
+        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed.items()))
+
+        master_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+        if not master_token or not TelegramInitDataAuthentication._check_hmac(
+            master_token, data_check_string, received_hash
+        ):
+            return Response({"error": "initData imzosi noto'g'ri"}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            user_data = json.loads(parsed.get("user", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            return Response({"error": "initData.user formati noto'g'ri"}, status=status.HTTP_400_BAD_REQUEST)
+
+        telegram_user_id = str(user_data.get("id", "")).strip()
+        if not telegram_user_id or telegram_user_id not in settings.SUPERADMIN_TG_CHAT_IDS:
+            return Response(
+                {"error": "Bu Telegram akkaunt platforma xodimi sifatida ro'yxatdan o'tmagan."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # ⚠️ Foydalanuvchi "Chiqish" bosgan bo'lsa, buni ESLAB QOLISH shart —
+        # LEKIN faqat frontend `localStorage`iga ishonib bo'lmaydi: ba'zi
+        # Telegram mini-app WebView'lari ilova yopilganda (masalan burchakdagi
+        # "X" bilan) saytning localStorage'ini TOZALAB yuboradi (jonli
+        # holatda aniqlandi — bu Telegram platformasining o'zi, bizning
+        # kodimiz emas). Shu sabab "chiqib ketgan" holati SERVER tomonida
+        # (keshda) saqlanadi — bu klient tomonidagi saqlash qanday
+        # ishlashidan mustaqil, har doim ishonchli.
+        from django.core.cache import cache
+
+        logout_flag_key = f"superadmin_tg_logged_out:{telegram_user_id}"
+        if cache.get(logout_flag_key):
+            return Response(
+                {"error": "Siz chiqib ketgansiz. Iltimos, login va parol bilan qayta kiring."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Shu chat_id uchun doimiy, Telegram orqali boshqariladigan staff
+        # hisob — parol bilan kirib bo'lmaydi (unusable), faqat shu yo'l bilan.
+        # ⚠️ `username` ("tg_admin_<chat_id>") ichki texnik identifikator —
+        # frontendda HECH QACHON to'g'ridan-to'g'ri ko'rsatilmasligi kerak
+        # (chat_id'ni ochib qo'yadi). Shuning uchun Telegram'dagi haqiqiy
+        # ismni (`first_name`) alohida saqlaymiz — `SuperAdminMeView` shuni
+        # qaytaradi, `username`ni emas.
+        username = f"tg_admin_{telegram_user_id}"
+        real_name = str(user_data.get("first_name", "")).strip()
+        user, created = User.objects.get_or_create(
+            username=username,
+            defaults={"is_staff": True, "is_superuser": True, "first_name": real_name},
+        )
+        if created:
+            user.set_unusable_password()
+            user.save()
+        elif real_name and user.first_name != real_name:
+            user.first_name = real_name
+            user.save(update_fields=["first_name"])
+
+        refresh = RefreshToken.for_user(user)
+        return Response({"access": str(refresh.access_token), "refresh": str(refresh)}, status=status.HTTP_200_OK)
+
+
 class SuperAdminMeView(APIView):
     """
     Super Admin panelining login sahifasi shu endpointni JWT olingandan
@@ -228,11 +335,50 @@ class SuperAdminMeView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def get(self, request):
+        # ⚠️ `username` (Telegram orqali kirganlar uchun "tg_admin_<chat_id>"
+        # bo'lishi mumkin — ichki, texnik format, chat_id'ni ochib qo'yadi)
+        # frontendga ATAYLAB yuborilmaydi. `display_name` — foydalanuvchiga
+        # ko'rsatish uchun xavfsiz qiymat: haqiqiy ism bo'lsa o'sha,
+        # bo'lmasa (parol orqali kirgan, username'ni o'zi tanlagan holatlar
+        # uchun) username'ning o'zi ko'rsatiladi.
+        display_name = request.user.first_name.strip() or request.user.username
+
+        # Muvaffaqiyatli autentifikatsiyadan o'tgan (istalgan usul —
+        # Telegram YOKI parol) — demak foydalanuvchi ANIQ qayta kirmoqchi,
+        # "chiqib ketgan" belgisi endi eskirgan, tozalaymiz.
+        chat_id = _extract_tg_admin_chat_id(request.user.username)
+        if chat_id:
+            from django.core.cache import cache
+            cache.delete(f"superadmin_tg_logged_out:{chat_id}")
+
         return Response({
-            "username": request.user.username,
-            "email": request.user.email,
+            "display_name": display_name,
             "is_staff": True,
         }, status=status.HTTP_200_OK)
+
+
+class SuperAdminTelegramLogoutView(APIView):
+    """
+    "Chiqish" bosilganda chaqiriladi (faqat Telegram orqali — `tg_admin_`
+    hisoblar uchun) — SERVER tomonida "chiqib ketgan" belgisini qo'yadi.
+    POST /api/v1/superadmin/telegram-logout/
+
+    ⚠️ Nega SERVER tomonida (faqat `localStorage`da emas): ba'zi Telegram
+    mini-app WebView'lari ilova yopilganda (masalan burchakdagi "X")
+    saytning `localStorage`sini tozalab yuboradi — bu holda mahalliy
+    belgi yo'qolib, keyingi ochilishda avtomatik Telegram-kirish yana
+    ishlab ketardi (jonli holatda aynan shu holat aniqlandi).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        chat_id = _extract_tg_admin_chat_id(request.user.username)
+        if chat_id:
+            from django.core.cache import cache
+            # 30 kun — "REFRESH_TOKEN_LIFETIME" bilan bir xil muddat: shu
+            # vaqt ichida qayta avtomatik Telegram-kirish bloklanadi.
+            cache.set(f"superadmin_tg_logged_out:{chat_id}", True, timeout=60 * 60 * 24 * 30)
+        return Response({"success": True}, status=status.HTTP_200_OK)
 
 
 class SuperAdminBusinessListCreateView(generics.ListCreateAPIView):

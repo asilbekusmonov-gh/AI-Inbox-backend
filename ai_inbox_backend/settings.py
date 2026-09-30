@@ -303,6 +303,14 @@ FIELD_ENCRYPTION_KEY = env("FIELD_ENCRYPTION_KEY", default="")
 TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
 TELEGRAM_WEBHOOK_SECRET = env("TELEGRAM_WEBHOOK_SECRET", default="")
 
+# Super Admin (platforma egasi) — LeadNode bot orqali /ops/ paneliga
+# kirishga ruxsat berilgan Telegram chat_id(lar), vergul bilan ajratilgan.
+# ⚠️ Bu — ALOHIDA, do'kon (Store) egaligidan mustaqil ruxsat ro'yxati:
+# platforma darajasidagi kirish uchun, biror aniq Store'ga bog'lanmagan.
+SUPERADMIN_TG_CHAT_IDS = [
+    cid.strip() for cid in env("SUPERADMIN_TG_CHAT_IDS", default="").split(",") if cid.strip()
+]
+
 # Public URL (ngrok / cloudflare tunnel / production domain)
 PUBLIC_URL = env("PUBLIC_URL", default="").rstrip("/")
 

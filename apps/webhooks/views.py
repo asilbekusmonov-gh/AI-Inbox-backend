@@ -73,6 +73,30 @@ class TelegramWebhookView(View):
             # Telegram'ga 200 qaytaramiz — aks holda qayta-qayta yuboradi!
             return HttpResponse(status=200)
 
+        # 2.5 Super Admin (platforma egasi) — LeadNode bot orqali `/ops`
+        # buyrug'i bilan `/ops/` paneliga kirish tugmasini so'raydi. Bu —
+        # HECH QANDAY do'konga bog'liq emas, shuning uchun pastdagi
+        # do'kon-topish (3-qadam) dan OLDIN, alohida tekshiriladi. Faqat
+        # MASTER bot tokenida va faqat `SUPERADMIN_TG_CHAT_IDS` ro'yxatidagi
+        # chat_id'lar uchun ishlaydi — boshqa hamma uchun bu oddiy,
+        # tanimaydigan matn sifatida pastdagi odatdagi oqimga tushib ketadi.
+        if bot_token == getattr(settings, "TELEGRAM_BOT_TOKEN", ""):
+            _msg = payload.get("message") or {}
+            _text = (_msg.get("text") or "").strip()
+            _sender_id = str(_msg.get("from", {}).get("id", ""))
+            _is_private = _msg.get("chat", {}).get("type") == "private"
+            if (
+                _is_private and _text.startswith("/ops")
+                and _sender_id in getattr(settings, "SUPERADMIN_TG_CHAT_IDS", [])
+            ):
+                # ⚠️ Faqat shaxsiy (1:1) chatda — aks holda, agar ruxsat
+                # etilgan admin shu buyruqni GURUHDA yozsa, tugma o'sha
+                # guruhga chiqib ketardi (haqiqiy xavfsizlik teshigi emas,
+                # chunki bosilganda baribir faqat SHU chat_id'ning o'zi
+                # kira oladi — lekin quruq/chalkash holat, kerak emas).
+                self._send_superadmin_ops_button(bot_token, _msg["chat"]["id"])
+                return HttpResponse(status=200)
+
         # 3. Do'konni bot_token orqali topamiz (bot haqiqiy va faolligini tekshirish uchun)
         token_store = self._get_store_by_token(bot_token)
         if not token_store:
@@ -573,6 +597,27 @@ class TelegramWebhookView(View):
             self._bind_group_to_store(matches[0], chat_id, bot_token)
         except Exception as e:
             logger.error(f"my_chat_member qayta ishlashda xato: {e}", exc_info=True)
+
+    def _send_superadmin_ops_button(self, bot_token: str, chat_id) -> None:
+        """Ruxsat etilgan platforma egasiga `/ops/` panelni ochuvchi Telegram WebApp tugmasini yuboradi."""
+        from apps.chat.senders import send_telegram_message
+
+        public_url = getattr(settings, "PUBLIC_URL", "").rstrip("/")
+        if not public_url:
+            logger.error("PUBLIC_URL sozlanmagan! Super Admin tugmasi yuborilmadi.")
+            return
+
+        send_telegram_message(
+            bot_token=bot_token,
+            chat_id=chat_id,
+            text="👑 <b>Super Admin panel</b>\n\nPlatformani boshqarish uchun pastdagi tugmani bosing.",
+            parse_mode="HTML",
+            reply_markup={
+                "inline_keyboard": [[
+                    {"text": "🚀 Ops panelni ochish", "web_app": {"url": f"{public_url}/ops/"}}
+                ]]
+            },
+        )
 
     def _get_store_by_token(self, bot_token: str) -> Store | None:
         """Bot token bo'yicha aktiv do'konni topadi"""

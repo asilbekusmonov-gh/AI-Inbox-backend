@@ -278,13 +278,33 @@ class StoreStaffMemberSerializer(serializers.ModelSerializer):
 class SuperAdminBusinessListSerializer(serializers.ModelSerializer):
     """Platforma darajasidagi bizneslar ro'yxati uchun — ro'yxat sahifasida ko'rsatiladigan qisqa ma'lumot."""
     total_leads = serializers.IntegerField(read_only=True)  # .annotate() orqali queryset'ga qo'shiladi
+    admin_link = serializers.SerializerMethodField()
+    customer_link = serializers.SerializerMethodField()
 
     class Meta:
         model = Store
         fields = [
             "id", "name", "category_type", "subscription_plan",
             "is_active", "ai_active", "tg_owner_chat_id", "total_leads", "created_at",
+            "admin_link", "customer_link",
         ]
+
+    # ⚠️ Yaratilish paytida ko'rsatilgan havolalar bir martalik "Biznes
+    # yaratildi" oynasi yopilgach BUTUNLAY yo'qolib qolardi — foydalanuvchi
+    # buni "qayerga saqlab qo'yishim kerak" deb to'g'ri tashvishlandi.
+    # Haqiqatda bu havolalar HECH QANDAY maxfiy narsa emas, faqat
+    # `do'kon_id + bot_username`dan hisoblangan oddiy formula — shuning
+    # uchun ularni istalgan vaqt QAYTA hisoblab berish mumkin (xuddi
+    # `provision_store`dagi bilan AYNAN bir xil formula).
+    def get_admin_link(self, obj):
+        if not obj.tg_bot_username:
+            return None
+        return f"https://t.me/{obj.tg_bot_username}?start=admin_{obj.id}"
+
+    def get_customer_link(self, obj):
+        if not obj.tg_bot_username:
+            return None
+        return f"https://t.me/{obj.tg_bot_username}?start=store_{obj.id}"
 
 
 class SuperAdminBusinessCreateSerializer(serializers.Serializer):
