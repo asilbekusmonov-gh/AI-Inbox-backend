@@ -39,6 +39,26 @@ def twa_dashboard_view(request):
     return response
 
 
+def ops_dashboard_view(request):
+    """Super Admin (platforma egasi) paneli — alohida Next.js static build'dan serve qiladi.
+
+    `twa_dashboard_view`dan farqli o'laroq ATAYLAB `@xframe_options_exempt`
+    QILINMAYDI — bu hech qachon Telegram iframe ichida ochilmaydi, shuning
+    uchun Django'ning standart X-Frame-Options himoyasi saqlanib qolishi kerak.
+    """
+    import os
+    from django.http import FileResponse, HttpResponseNotFound
+    from django.conf import settings
+
+    html_path = os.path.join(settings.BASE_DIR, "static", "ops", "index.html")
+    if not os.path.exists(html_path):
+        return HttpResponseNotFound("Ops dashboard not deployed yet. Run: ./deploy_ops.sh")
+    response = FileResponse(open(html_path, "rb"), content_type="text/html; charset=utf-8")
+    response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response["Pragma"] = "no-cache"
+    return response
+
+
 def privacy_policy_view(request):
     """
     Meta App Review talabiga mos Mahfiylik Siyosati sahifasi.

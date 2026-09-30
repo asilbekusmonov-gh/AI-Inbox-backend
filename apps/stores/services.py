@@ -680,3 +680,75 @@ def refresh_token_for_store(store) -> bool:
             exc_info=True,
         )
         return False
+
+
+# ─────────────────────────────────────────────────────────────
+# Yangi Do'kon Yaratish (Provisioning)
+# ─────────────────────────────────────────────────────────────
+
+class StoreProvisioningError(Exception):
+    """Yangi do'kon yaratishda foydalanuvchi xatosi (bo'sh nom, sozlanmagan token va h.k.)."""
+    pass
+
+
+def provision_store(name: str, category_type: str, bot_username: str = "LeadNodeBot") -> dict:
+    """
+    Yangi do'kon (tenant) yaratadi va admin/mijoz Telegram havolalarini
+    qaytaradi.
+
+    ⚠️ Bu funksiya avval `apps/stores/management/commands/create_store.py`
+    ichida qattiq yozilgan edi — endi Super Admin panel (API orqali) ham,
+    terminal buyrug'i ham AYNAN shu logikani chaqiradi, ikki joyda
+    takrorlanmasin.
+
+    Args:
+        name: Do'kon nomi
+        category_type: Store.CategoryType qiymatlaridan biri
+        bot_username: Telegram bot username (@ belgisisiz)
+
+    Returns:
+        {"store": Store, "admin_link": str, "customer_link": str}
+
+    Raises:
+        StoreProvisioningError: nom bo'sh, yoki TELEGRAM_BOT_TOKEN sozlanmagan
+    """
+    import uuid as _uuid
+
+    from django.contrib.auth.models import User
+    from django.utils.text import slugify
+
+    from .models import Store
+
+    name = (name or "").strip()
+    bot_username = (bot_username or "LeadNodeBot").replace("@", "").strip()
+
+    if not name:
+        raise StoreProvisioningError("Do'kon nomi bo'sh bo'lishi mumkin emas.")
+
+    if not getattr(settings, "TELEGRAM_BOT_TOKEN", ""):
+        raise StoreProvisioningError(
+            "TELEGRAM_BOT_TOKEN .env faylida sozlanmagan! Master bot tokenisiz do'kon yaratib bo'lmaydi."
+        )
+
+    base_username = slugify(name).replace("-", "_")[:20] or "store"
+    username = f"{base_username}_{_uuid.uuid4().hex[:6]}"
+    owner = User.objects.create(
+        username=username,
+        email=f"{username}@placeholder.local",
+    )
+
+    store = Store.objects.create(
+        owner=owner,
+        name=name,
+        category_type=category_type,
+        platform=Store.Platform.TELEGRAM,
+        tg_bot_token=settings.TELEGRAM_BOT_TOKEN,
+        tg_bot_username=bot_username,
+    )
+
+    admin_link = f"https://t.me/{bot_username}?start=admin_{store.id}"
+    customer_link = f"https://t.me/{bot_username}?start=store_{store.id}"
+
+    logger.info(f"[Store Provisioning] Yangi do'kon yaratildi: {store.name} (ID: {store.id})")
+
+    return {"store": store, "admin_link": admin_link, "customer_link": customer_link}

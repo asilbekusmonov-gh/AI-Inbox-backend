@@ -270,3 +270,26 @@ class StoreStaffMemberSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Telegram username kiritilishi shart.")
         return cleaned
 
+
+# ─────────────────────────────────────────────────────────────
+# Super Admin (Platforma Egasi) Serializerlari
+# ─────────────────────────────────────────────────────────────
+
+class SuperAdminBusinessListSerializer(serializers.ModelSerializer):
+    """Platforma darajasidagi bizneslar ro'yxati uchun — ro'yxat sahifasida ko'rsatiladigan qisqa ma'lumot."""
+    total_leads = serializers.IntegerField(read_only=True)  # .annotate() orqali queryset'ga qo'shiladi
+
+    class Meta:
+        model = Store
+        fields = [
+            "id", "name", "category_type", "subscription_plan",
+            "is_active", "ai_active", "tg_owner_chat_id", "total_leads", "created_at",
+        ]
+
+
+class SuperAdminBusinessCreateSerializer(serializers.Serializer):
+    """Super Admin panelidan yangi biznes (do'kon) yaratish uchun kiruvchi ma'lumotlar."""
+    name = serializers.CharField(max_length=255)
+    category_type = serializers.ChoiceField(choices=Store.CategoryType.choices)
+    bot_username = serializers.CharField(max_length=64, required=False, default="LeadNodeBot")
+

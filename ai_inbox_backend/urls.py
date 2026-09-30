@@ -8,6 +8,7 @@ from django.conf.urls.static import static
 from django.views.generic import RedirectView
 from apps.core.views import (
     twa_dashboard_view,
+    ops_dashboard_view,
     privacy_policy_view,
     meta_data_deletion_callback,
     deletion_status_view,
@@ -26,6 +27,11 @@ urlpatterns = [
 
     # Telegram Mini App (TWA) Dashboard — Next.js static build
     path("app/", twa_dashboard_view, name="twa-dashboard"),
+
+    # Super Admin (platforma egasi) paneli — alohida Next.js static build,
+    # mijozlar/do'kon egalari umuman ko'rmaydigan, JS bundle'i /app/ga
+    # aralashmaydigan mustaqil sahifa.
+    path("ops/", ops_dashboard_view, name="ops-dashboard"),
 
     # Meta Verification & Legal Pages
     path("privacy-policy/", privacy_policy_view, name="privacy-policy"),
@@ -56,8 +62,10 @@ from django.views.static import serve
 from django.urls import re_path
 
 TWA_STATIC_DIR = os.path.join(settings.BASE_DIR, "static", "twa")
+OPS_STATIC_DIR = os.path.join(settings.BASE_DIR, "static", "ops")
 urlpatterns += [
     re_path(r"^app/(?P<path>.+)$", serve, {"document_root": TWA_STATIC_DIR}),
+    re_path(r"^ops/(?P<path>.+)$", serve, {"document_root": OPS_STATIC_DIR}),
 ]
 
 # Development rejimida Django'ning o'zi media va static fayllarni serve qiladi.

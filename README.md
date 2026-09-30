@@ -16,6 +16,7 @@ AI-Inbox connects a business's Telegram (and soon Instagram) presence to a Gemin
 - [Project layout](#project-layout)
 - [Getting started](#getting-started)
 - [Onboarding a store](#onboarding-a-store)
+- [Super Admin panel](#super-admin-panel)
 - [Management commands](#management-commands)
 - [API](#api)
 - [CI/CD](#cicd)
@@ -147,6 +148,24 @@ docker compose exec web python manage.py create_store --name "Zulfiya Fashion" -
 
 The owner opens the admin link once, taps Start, and their Telegram account is bound to that store — the TWA dashboard opens automatically from then on via the bot's menu button.
 
+## Super Admin panel
+
+A web dashboard for the platform operator — replaces the terminal workflow above with a UI at `/ops/` (served by this backend, built from a separate Next.js repo: `AI-Inbox-ops-frontend`). Lets you create stores, browse the business list with search/filter, and see platform-wide stats, without touching a terminal. It is a **separate, standalone frontend** (own static export, own `basePath`) so its code never ships to tenant/customer browsers.
+
+**One-time setup — create your own platform-staff account** (no UI for this, by design — it's a single command run once per environment):
+
+```bash
+docker compose exec web python manage.py createsuperuser
+```
+
+Any Django user with `is_staff=True` can log into `/ops/` with that username/password — the login screen calls the existing `/api/v1/token/` JWT endpoint under the hood, then verifies `is_staff` via `/api/v1/superadmin/me/` before granting access. Non-staff users (including store owners) get a clear "not authorized" message instead of a confusing error.
+
+Deploy the ops panel the same way as the TWA:
+
+```bash
+./deploy_ops.sh
+```
+
 ## Management commands
 
 | Command | Purpose |
@@ -203,6 +222,8 @@ The Telegram Mini App dashboard is a separate Next.js repo, statically exported 
 cp -r <frontend-repo>/out/* static/twa/
 docker compose restart nginx
 ```
+
+The [Super Admin panel](#super-admin-panel) is a second, separate Next.js repo (`AI-Inbox-ops-frontend`), same pattern, exported to `static/ops/` and served at `/ops/`. Kept deliberately separate from the tenant-facing app above so platform-operator tooling never ships to customer browsers.
 
 ## Roadmap
 

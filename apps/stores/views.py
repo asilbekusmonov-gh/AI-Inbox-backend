@@ -12,6 +12,8 @@ from .serializers import (
     StoreOnboardingSerializer,
     OnboardingItemSerializer,
     StoreStaffMemberSerializer,
+    SuperAdminBusinessListSerializer,
+    SuperAdminBusinessCreateSerializer,
     validate_item_metadata,
 )
 from .models import StoreStaffMember
@@ -157,10 +159,15 @@ class SuperAdminStatsView(APIView):
         from apps.orders.models import Lead
         from apps.customers.models import Customer
 
+        from django.utils import timezone as _timezone
+
         total_stores = Store.objects.filter(is_deleted=False).count()
         active_stores = Store.objects.filter(is_active=True, is_deleted=False).count()
         total_leads = Lead.objects.filter(is_deleted=False).count()
         total_customers = Customer.objects.filter(is_deleted=False).count()
+        leads_today = Lead.objects.filter(
+            is_deleted=False, created_at__date=_timezone.now().date(),
+        ).count()
 
         # Bot health check
         bot_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
@@ -198,10 +205,91 @@ class SuperAdminStatsView(APIView):
             "active_stores": active_stores,
             "total_leads": total_leads,
             "total_customers": total_customers,
+            "leads_today": leads_today,
             "bot_active": bot_active,
             "bot_username": f"@{bot_username}" if bot_username != "unknown" else None,
             "stores": stores_list
         }, status=status.HTTP_200_OK)
+
+
+class SuperAdminMeView(APIView):
+    """
+    Super Admin panelining login sahifasi shu endpointni JWT olingandan
+    keyin DARHOL chaqiradi — token haqiqatan ham platforma xodimiga
+    (is_staff) tegishli ekanini tasdiqlash uchun.
+
+    ⚠️ `/api/v1/token/` o'zi FAQAT parolni tekshiradi, `is_staff`ni emas —
+    ya'ni parolga ega har qanday oddiy foydalanuvchi ham token ola oladi.
+    Shu sabab frontend token olgandan keyin BU endpointni chaqirib, 403
+    kelsa "siz platforma xodimi emassiz" deb aniq xabar bera oladi —
+    aks holda xato keyinroq, chalkash joyda chiqib qolardi.
+    GET /api/v1/superadmin/me/
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request):
+        return Response({
+            "username": request.user.username,
+            "email": request.user.email,
+            "is_staff": True,
+        }, status=status.HTTP_200_OK)
+
+
+class SuperAdminBusinessListCreateView(generics.ListCreateAPIView):
+    """
+    Super Admin — barcha bizneslar ro'yxati (qidiruv/filtr/pagination
+    bilan) va yangi biznes yaratish.
+    GET  /api/v1/superadmin/businesses/  — ro'yxat
+    POST /api/v1/superadmin/businesses/  — yangi do'kon yaratish
+
+    ⚠️ `SuperAdminStatsView`dan ATAYLAB alohida — u yerdagi statistika
+    javobi (barcha do'konlarni sahifasiz qaytaradi) o'zgarishsiz qoladi,
+    bu yerda esa haqiqiy pagination/qidiruv/filtr bilan mustaqil rivojlanadi.
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return SuperAdminBusinessCreateSerializer
+        return SuperAdminBusinessListSerializer
+
+    def get_queryset(self):
+        from django.db.models import Count, Q
+
+        from .models import Store
+
+        qs = Store.objects.filter(is_deleted=False).annotate(
+            total_leads=Count("leads", filter=Q(leads__is_deleted=False))
+        ).order_by("-created_at")
+
+        search = self.request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(name__icontains=search)
+
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active.lower() == "true")
+
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        from apps.stores.services import StoreProvisioningError, provision_store
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            result = provision_store(**serializer.validated_data)
+        except StoreProvisioningError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        store = result["store"]
+        return Response({
+            "id": str(store.id),
+            "name": store.name,
+            "admin_link": result["admin_link"],
+            "customer_link": result["customer_link"],
+        }, status=status.HTTP_201_CREATED)
 
 
 class InstagramConnectView(APIView):

@@ -11,14 +11,10 @@ Ishlatish:
 python manage.py create_store --name "Najot Ta'lim" --category education
 python manage.py create_store --name "Beauty Studio" --category services
 """
-import uuid
-
-from django.conf import settings
-from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand, CommandError
-from django.utils.text import slugify
 
 from apps.stores.models import Store
+from apps.stores.services import StoreProvisioningError, provision_store
 
 
 class Command(BaseCommand):
@@ -50,41 +46,17 @@ class Command(BaseCommand):
         category = options["category"]
         bot_username = options["bot_username"].replace("@", "").strip()
 
-        if not name:
-            raise CommandError("--name bo'sh bo'lishi mumkin emas.")
+        # ⚠️ Yaratish logikasi endi `apps/stores/services.py::provision_store`ga
+        # ko'chirilgan — Super Admin panel (API) ham AYNAN shu funksiyani
+        # chaqiradi, ikki joyda takrorlanmasin.
+        try:
+            result = provision_store(name=name, category_type=category, bot_username=bot_username)
+        except StoreProvisioningError as e:
+            raise CommandError(str(e))
 
-        if not settings.TELEGRAM_BOT_TOKEN:
-            raise CommandError(
-                "TELEGRAM_BOT_TOKEN .env faylida sozlanmagan! "
-                "Master bot tokenisiz do'kon yaratib bo'lmaydi."
-            )
-
-        # Har bir Store bitta Django User'ga bog'lanadi (OneToOneField) —
-        # shuning uchun har safar yangi, nomi bilan bog'liq unikal User yaratamiz.
-        base_username = slugify(name).replace("-", "_")[:20] or "store"
-        username = f"{base_username}_{uuid.uuid4().hex[:6]}"
-        owner = User.objects.create(
-            username=username,
-            email=f"{username}@placeholder.local",
-        )
-
-        store = Store.objects.create(
-            owner=owner,
-            name=name,
-            category_type=category,
-            platform=Store.Platform.TELEGRAM,
-            tg_bot_token=settings.TELEGRAM_BOT_TOKEN,
-            # ⚠️ BUG FIX: bu maydon avval bo'sh qoldirilardi — Sozlamalar
-            # sahifasidagi "Guruhga qo'shish" havolasi (`?startgroup=...`)
-            # aynan shu qiymatga bog'liq, shuning uchun yangi yaratilgan
-            # do'konlarda ega hech qachon guruh qo'shish tugmasini ko'ra
-            # olmasdi ("avval Telegram botni ulang" degan xabar tursa ham,
-            # bot allaqachon ulangan edi — jonli testda aniqlandi).
-            tg_bot_username=bot_username,
-        )
-
-        admin_link = f"https://t.me/{bot_username}?start=admin_{store.id}"
-        customer_link = f"https://t.me/{bot_username}?start=store_{store.id}"
+        store = result["store"]
+        admin_link = result["admin_link"]
+        customer_link = result["customer_link"]
 
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS(f"✅ Do'kon yaratildi: {store.name} (ID: {store.id})"))
