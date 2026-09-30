@@ -207,9 +207,17 @@ class Store(BaseModel):
         # ⚠️ BUG FIX: 1000 token bilan uzun sotuv matni + oxiridagi lid/buyurtma
         # JSON bloki ba'zan sig'may qolib, javob JSON o'rtasida kesilib ketardi —
         # bu esa kesilgan JSON mijozga xom (tozalanmagan) holda ko'rinishiga
-        # olib kelgan edi (jonli testda kuzatildi). 1500 token qo'shimcha
-        # zaxira beradi.
-        default=1500,
+        # olib kelgan edi (jonli testda kuzatildi). 1500ga oshirilgan edi.
+        # ⚠️ IKKINCHI BUG FIX (jonli holatda topilgan, jiddiyroq): prompt
+        # endi BITTA emas, IKKI TA ketma-ket JSON blok chiqaradi
+        # ("suhbat_holati" + "lid_malumotlari") — 1500 token ikkalasi +
+        # uzun sotuv matni uchun YANA yetmay qoldi, va bu safar kesilish
+        # aynan LID JSON'ida bo'lib, mijoz ism+telefon bergan bo'lsa ham
+        # Lead HECH QACHON yaratilmasdi (real mijoz yo'qotilgan holat).
+        # 3000ga oshirildi — Gemini narxi chiqish tokeniga qarab (ishlatilgan
+        # miqdor uchun) to'lanadi, bu shunchaki YUQORI CHEGARA, oddiy javob
+        # buncha token sarflamaydi, faqat kesilishning oldini oladi.
+        default=3000,
         help_text="AI javobining maksimal uzunligi (token)"
     )
 

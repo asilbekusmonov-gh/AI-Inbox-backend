@@ -383,13 +383,41 @@ class TelegramWebhookView(View):
         send_telegram_message(
             bot_token=bot_token,
             chat_id=chat_id,
-            text=(
-                f"✅ <b>Bot</b> ushbu guruhga muvaffaqiyatli ulandi — endi <b>{store.name}</b> uchun ishlaydi!\n\n"
-                f"A'zolar kurs/xizmat haqida savol yozsa, AI sotuvchi shu yerda avtomatik javob beradi — "
-                f"botni belgilash yoki xabariga javob (reply) berish shart emas."
-            ),
+            text=f"✅ <b>Bot</b> ushbu guruhga muvaffaqiyatli ulandi — endi <b>{store.name}</b> uchun ishlaydi!",
             parse_mode="HTML",
         )
+
+        # ⚠️ Telegram "Group Privacy Mode" (BotFather sozlamasi, API orqali
+        # o'zgartirib bo'lmaydi) standart holatda YOQILGAN bo'ladi — bunda
+        # bot guruhda FAQAT o'ziga @mention/reply qilingan xabarlarni
+        # ko'radi, oddiy mijoz savoli ("kurs qancha turadi?") botga
+        # UMUMAN YETIB BORMAYDI (jonli holatda aniqlandi: bizning kodimiz
+        # mention talab qilmasa ham, Telegram'ning o'zi xabarni yubormagan
+        # edi). Buni har bir do'kon egasi @BotFather orqali BIR MARTA
+        # qo'lda o'chirishi kerak — shuni aynan guruhga ulangan ONDA,
+        # ega buni eslab qolishi ehtimoli eng yuqori bo'lgan paytda,
+        # shaxsiy chatga (guruhga emas — bu ichki texnik ko'rsatma,
+        # mijozlar ko'rmasligi kerak) eslatib qo'yamiz.
+        if store.tg_owner_chat_id:
+            bot_username = store.tg_bot_username or ""
+            send_telegram_message(
+                bot_token=bot_token,
+                chat_id=store.tg_owner_chat_id,
+                text=(
+                    f"⚠️ <b>Muhim, bir martalik sozlash</b>\n\n"
+                    f"Guruhdagi mijozlar botni <b>belgilamasdan</b> ("
+                    f"@{bot_username or 'bot'} deb yozmasdan) ham savol bersa, "
+                    f"bot javob berishi uchun Telegram'ning o'z sozlamasini "
+                    f"o'chirish kerak:\n\n"
+                    f"1. <b>@BotFather</b>ni oching\n"
+                    f"2. <code>/setprivacy</code> buyrug'ini yuboring\n"
+                    f"3. Botingizni tanlang: @{bot_username}\n"
+                    f"4. <b>Disable</b> tugmasini bosing\n\n"
+                    f"Shuni bir marta qilib qo'ysangiz, bot guruhdagi barcha "
+                    f"savollarni ko'ra oladigan bo'ladi."
+                ),
+                parse_mode="HTML",
+            )
 
     def _handle_group_binding(self, message, bot_token: str) -> None:
         """

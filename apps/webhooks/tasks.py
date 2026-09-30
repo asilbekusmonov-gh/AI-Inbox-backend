@@ -1195,6 +1195,56 @@ def process_incoming_message(
                         f"data={ai_response.lead_data}"
                     )
 
+            # ── 7.1. Zaxira (fallback) lid yaratish ─────────────────────────
+            # ⚠️ Jonli holatda aniqlangan JIDDIY bug: AI javobi ikki JSON
+            # blokini ("suhbat_holati" va undan keyingi "lid_malumotlari")
+            # KETMA-KET bir xil `max_output_tokens` byudjetida chiqaradi.
+            # Uzun sotuv matni + ikkala blok bir vaqtda sig'may qolsa, Gemini
+            # javobni "lid_malumotlari" bloki O'RTASIDA kesib qo'yadi —
+            # `_extract_lead_data` esa buzuq/yo'q JSON'ni jimgina `None`
+            # qaytaradi. Natijada mijoz ism+telefonini bergan, AI unga
+            # "ro'yxatdan o'tkazdim" deb yozgan bo'lsa ham, HAQIQIY Lead
+            # HECH QACHON yaratilmaydi — ega buni umuman bilmaydi (faqat
+            # log qatorida "aniqlandi lekin saqlanmadi" ko'rinadi, TWA'da
+            # yo'q). Lekin xuddi shu ism/telefon "suhbat_holati" blokidagi
+            # `memory`ga ALLAQACHON ishonchli parslanib ulgurgan bo'ladi
+            # (u JSON kesilishdan OLDIN keladi) — shundan foydalanib, agar
+            # yuqoridagi asosiy yo'l lid TOPMAGAN, lekin AI stage'ni
+            # "registered"ga o'tkazib, memory'da ism+telefon qoldirgan
+            # bo'lsa, shu ma'lumotdan Lead yaratamiz (dublikat himoyasi
+            # `create_lead_from_ai_data` ichida allaqachon bor).
+            elif ai_response.conversation_state:
+                _fallback_memory = ai_response.conversation_state.get("memory") or {}
+                _fallback_name = str(_fallback_memory.get("full_name", "")).strip()
+                _fallback_phone = str(_fallback_memory.get("phone", "")).strip()
+                if (
+                    ai_response.conversation_state.get("stage") == Customer.ConversationStage.REGISTERED
+                    and _fallback_name and _fallback_phone
+                ):
+                    logger.warning(
+                        f"[Task] Lid JSON kesilgan/topilmadi, lekin 'registered' "
+                        f"bosqichi va memory'da ism+telefon bor — zaxira orqali "
+                        f"Lead yaratilmoqda | mijoz={_fallback_name} | store={store.name}"
+                    )
+                    fallback_lead = create_lead_from_ai_data(
+                        store=store,
+                        customer=customer,
+                        lead_data={
+                            "full_name": _fallback_name,
+                            "phone": _fallback_phone,
+                            "notes": "⚠️ AI javobi kesilib qolgani uchun zaxira (suhbat holati) orqali yaratildi.",
+                            "course_name": _fallback_memory.get("goal", ""),
+                            "preferred_time": _fallback_memory.get("preferred_day", ""),
+                        },
+                        platform=platform,
+                        source="group" if is_group else "private_chat",
+                        source_message=ai_message,
+                    )
+                    if fallback_lead:
+                        notify_store_owner(store=store, lead=fallback_lead)
+                        sync_lead_to_bitrix24(store=store, lead=fallback_lead)
+                        sync_lead_to_google_sheets(store=store, lead=fallback_lead)
+
             # ── 7.5. Sotuv suhbati holatini (stage/intent/lead_score/memory)
             # yangilash ──────────────────────────────────────────────────
             # ⚠️ AI'ning HAR bir javobida (lid topilgan-topilmaganidan qat'i
