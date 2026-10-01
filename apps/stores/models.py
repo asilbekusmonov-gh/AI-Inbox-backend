@@ -238,22 +238,6 @@ class Store(BaseModel):
         help_text="AI javobining maksimal uzunligi (token)"
     )
 
-    class CommunicationTone(models.TextChoices):
-        FRIENDLY = "friendly", "Do'stona"
-        PROFESSIONAL = "professional", "Rasmiy"
-        CASUAL = "casual", "Erkin"
-
-    communication_tone = models.CharField(
-        max_length=20,
-        choices=CommunicationTone.choices,
-        default=CommunicationTone.FRIENDLY,
-        help_text=(
-            "AI qaysi ohangda gaplashsin — xom prompt yozishga muqobil, "
-            "oddiy til bilan tanlanadigan sozlama (Sozlamalar sahifasida "
-            "tugma sifatida ko'rinadi)."
-        )
-    )
-
     # ── Biznes ma'lumotlari (AI uchun ISHONCHLI kontekst — AI bu
     # ma'lumotlarni o'ylab topish o'rniga shu yerdan oladi) ──────
     working_hours = models.JSONField(
@@ -263,11 +247,6 @@ class Store(BaseModel):
             "Ish vaqti, kun bo'yicha: "
             '{"mon": {"closed": false, "open": "09:00", "close": "18:00"}, ...}'
         )
-    )
-    branches = models.JSONField(
-        default=list,
-        blank=True,
-        help_text='Filiallar ro\'yxati: [{"name": "...", "address": "...", "phone": "..."}]'
     )
     faq_items = models.JSONField(
         default=list,

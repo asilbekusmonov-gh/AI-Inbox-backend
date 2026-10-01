@@ -232,14 +232,6 @@ band_qilish_malumotlari:
 """
 }
 
-# ── Muloqot uslubi — Sozlamalar sahifasidagi "AI muloqot uslubi"
-# tugmalariga mos keladi (xom prompt o'rniga oddiy til bilan tanlov).
-TONE_INSTRUCTIONS = {
-    "friendly": "Iliq, do'stona va biroz samimiy ohangda gapiring — yaqin tanishga gapirayotgandek, lekin hurmatni saqlab. O'rinli joyda emoji ishlatish mumkin (ortiqcha emas).",
-    "professional": "Rasmiy, aniq va qisqa ohangda gapiring — professional administrator kabi. Emoji deyarli ishlatmang, so'zlashuv uslubidagi so'zlardan (masalan \"xo'p\", \"zo'r\") saqlaning.",
-    "casual": "Erkin, oddiy, xuddi tanish bilan suhbatlashayotgandek gapiring — qisqa jumlalar, tabiiy til. Haddan tashqari rasmiylashib ketmang.",
-}
-
 _UZ_DAY_LABELS = {
     "mon": "Dushanba", "tue": "Seshanba", "wed": "Chorshanba", "thu": "Payshanba",
     "fri": "Juma", "sat": "Shanba", "sun": "Yakshanba",
@@ -249,10 +241,10 @@ _WORKING_HOURS_DAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 def _build_business_facts_section(store) -> str:
     """
-    Do'kon egasi Sozlamalarda to'ldirgan ish vaqti/filiallar/FAQ —
-    AI'ga ISHONCHLI (tasdiqlangan, o'ylab topilmagan) fakt sifatida
-    beriladi. Hech biri to'ldirilmagan bo'lsa, bo'sh satr qaytaradi —
-    promptni keraksiz bo'sh bo'lim bilan shishirmaslik uchun.
+    Do'kon egasi Sozlamalarda to'ldirgan ish vaqti/FAQ — AI'ga
+    ISHONCHLI (tasdiqlangan, o'ylab topilmagan) fakt sifatida beriladi.
+    Hech biri to'ldirilmagan bo'lsa, bo'sh satr qaytaradi — promptni
+    keraksiz bo'sh bo'lim bilan shishirmaslik uchun.
     """
     parts = []
 
@@ -270,18 +262,6 @@ def _build_business_facts_section(store) -> str:
                 lines.append(f"- {label}: {info['open']}–{info['close']}")
         if lines:
             parts.append("### Ish vaqti:\n" + "\n".join(lines))
-
-    branches = getattr(store, "branches", None) or []
-    if branches:
-        lines = []
-        for b in branches:
-            bits = [b.get("name", "")]
-            if b.get("address"):
-                bits.append(b["address"])
-            if b.get("phone"):
-                bits.append(f"tel: {b['phone']}")
-            lines.append(f"- {' | '.join(bit for bit in bits if bit)}")
-        parts.append("### Filiallar:\n" + "\n".join(lines))
 
     faq_items = getattr(store, "faq_items", None) or []
     if faq_items:
@@ -454,9 +434,6 @@ Siz bilan muloqot qilayotgan inson ushbu do'konning HAKIQIY EGASI (Biznes Rahbar
         products_context = "Katalog haqida ma'lumot yuklanmadi."
 
     store_custom_prompt = store.ai_system_prompt or "Siz yordamchi botisiz."
-    tone_instruction = TONE_INSTRUCTIONS.get(
-        getattr(store, "communication_tone", None), TONE_INSTRUCTIONS["friendly"]
-    )
     business_facts_section = _build_business_facts_section(store)
 
     # ⚠️ BUG FIX: avval bu yerda AI'ga HOZIRGI SANA umuman berilmagan edi —
@@ -683,7 +660,6 @@ Mijoz sanani (masalan sinov darsi, band qilish, yetkazib berish uchun) aytganda 
 - Mijoz ANIQ so'ragandagina (masalan "kurs haqida ma'lumot bering", "kurslar bormi", "X kursi bormi", "qanday yo'nalishlar bor") — o'shandagina tegishli kurs/xizmat haqida (yoki mijoz aniq nomini aytgan bo'lsa, aynan o'sha haqida) ma'lumot bering.
 
 - OHANG QOIDASI: Real, tajribali do'kon xodimi kabi TABIIY va XOTIRJAM gapiring. Bir xabarda faqat 1-2 ta narsani taklif qiling, hammasini birdan sanab tashlamang. Ortiqcha bezak so'zlar, ko'plab emoji yoki qavariq reklama uslubidan saqlaning.
-- MULOQOT USLUBI (do'kon egasi Sozlamalarda tanlagan): {tone_instruction}
 - TAKRORLANISHDAN SAQLANING: suhbat tarixida o'zingiz avval ishlatgan tasdiqlash/kirish so'zlarini (masalan "Ha 😊", "Albatta 😊", "Tushundim 😊") keyingi xabarlarda AYNAN TAKRORLAMANG — har safar mazmunni saqlab, so'z tanlovini tabiiy ravishda almashtiring (masalan "Ha", "Albatta", "Tabiiyki", "Xo'p" va h.k. orasida); bir xil qisqa ibora va emoji qolipini qayta-qayta ishlatish bot ekanligingizni oshkor qilib, suhbatni sun'iy ko'rsatadi.
 - SUN'IY SHOSHILINCHLIK TAQIQI: "faqat N joy/dona qoldi", "shoshiling", "bugun oxirgi kun" kabi bosim o'tkazuvchi jumlalarni o'zingizdan qo'shib chiqarmang. Agar mijoz aniq so'rasa, katalogdagi haqiqiy sonni (masalan "hozircha N ta joy bor") tinch, informatsion ohangda ayting — buni hech qachon "shoshiling!" degan da'vat sifatida ishlatmang.
 

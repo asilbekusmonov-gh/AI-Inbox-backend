@@ -39,9 +39,7 @@ class StoreSerializer(serializers.ModelSerializer):
             "ai_model",
             "ai_temperature",
             "ai_max_tokens",
-            "communication_tone",
             "working_hours",
-            "branches",
             "faq_items",
             "subscription_plan",
             "monthly_message_limit",
@@ -84,17 +82,11 @@ class StoreSerializer(serializers.ModelSerializer):
         return obj.has_own_bot
 
 
-# ── Biznes ma'lumotlari (Filiallar/FAQ/Ish vaqti) — strukturaviy
-# JSON validatsiyasi, xuddi `validate_item_metadata` kabi: xom,
+# ── Biznes ma'lumotlari (FAQ/Ish vaqti) — strukturaviy JSON
+# validatsiyasi, xuddi `validate_item_metadata` kabi: xom,
 # tekshirilmagan JSON to'g'ridan-to'g'ri bazaga yozilmasligi uchun. ──
 
 WORKING_HOURS_DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-
-
-class BranchSerializer(serializers.Serializer):
-    name = serializers.CharField(max_length=255)
-    address = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
-    phone = serializers.CharField(max_length=30, required=False, allow_blank=True, default="")
 
 
 class FAQItemSerializer(serializers.Serializer):
@@ -106,14 +98,6 @@ class WorkingHoursDaySerializer(serializers.Serializer):
     closed = serializers.BooleanField(default=False)
     open = serializers.CharField(max_length=5, required=False, allow_blank=True, default="")
     close = serializers.CharField(max_length=5, required=False, allow_blank=True, default="")
-
-
-def validate_branches(branches: list) -> list:
-    if len(branches) > 20:
-        raise serializers.ValidationError("Ko'pi bilan 20 ta filial qo'shish mumkin.")
-    serializer = BranchSerializer(data=branches, many=True)
-    serializer.is_valid(raise_exception=True)
-    return serializer.validated_data
 
 
 def validate_faq_items(items: list) -> list:
@@ -144,9 +128,6 @@ class StoreConfigUpdateSerializer(serializers.ModelSerializer):
     Frontend SettingsView'dan PATCH /api/v1/store/ keladi.
     """
 
-    def validate_branches(self, value):
-        return validate_branches(value)
-
     def validate_faq_items(self, value):
         return validate_faq_items(value)
 
@@ -176,9 +157,7 @@ class StoreConfigUpdateSerializer(serializers.ModelSerializer):
             "ai_system_prompt",
             "ai_model",
             "ai_temperature",
-            "communication_tone",
             "working_hours",
-            "branches",
             "faq_items",
             "group_spam_cleanup_enabled",
             "ig_page_id",

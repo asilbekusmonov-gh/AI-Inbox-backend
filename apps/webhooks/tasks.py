@@ -980,6 +980,17 @@ def process_incoming_message(
                 f"model={store.ai_model}"
             )
 
+            # ⚠️ AI javobi 2-5+ soniya olishi mumkin — shu vaqt davomida
+            # mijoz hech qanday signal ko'rmasa, "bot osilib qoldimi?"
+            # degan taassurot qoldiradi. Best-effort — xato bo'lsa ham
+            # asosiy oqimni to'xtatmaydi (funksiyaning o'zi buni ta'minlaydi).
+            if platform == "telegram" and store.tg_bot_token:
+                from apps.chat.senders import send_telegram_typing_action
+                try:
+                    send_telegram_typing_action(bot_token=store.tg_bot_token, chat_id=chat_id)
+                except Exception as e:
+                    logger.warning(f"[Task] 'yozmoqda...' indikatori xatosi (e'tiborsiz qoldirildi): {e}")
+
             ai_response = get_ai_response(
                 store=store,
                 customer=customer,

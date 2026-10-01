@@ -168,6 +168,34 @@ def _send_telegram_chunk(
     return False
 
 
+def send_telegram_typing_action(bot_token: str, chat_id: str) -> bool:
+    """
+    Mijozga "yozmoqda..." indikatorini ko'rsatadi — AI javob tayyorlash
+    uchun 2-5+ soniya sarflashi mumkin, shu vaqt davomida mijoz hech
+    qanday signal ko'rmasa, "bot osilib qoldimi?" degan taassurot
+    qoldiradi. Telegram'da bu belgi taxminan 5 soniyadan keyin o'zi
+    yo'qoladi — uzoqroq kutish uchun chaqiruvchi tomonidan qayta
+    chaqirilishi kerak.
+
+    ⚠️ ATAYLAB best-effort: bu sof kosmetik amal, xato bo'lsa ham asosiy
+    oqimni (AI javobini kutish/yuborish) HECH QACHON to'xtatmasligi
+    kerak — shuning uchun qayta urinishsiz, qisqa timeout bilan, va
+    xatolar faqat jimgina logga yoziladi.
+    """
+    if not bot_token or not chat_id:
+        return False
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            response = client.post(
+                f"https://api.telegram.org/bot{bot_token}/sendChatAction",
+                json={"chat_id": chat_id, "action": "typing"},
+            )
+        return response.status_code == 200 and response.json().get("ok", False)
+    except Exception as e:
+        logger.warning(f"Telegram 'yozmoqda...' indikatorini yuborib bo'lmadi: {e}")
+        return False
+
+
 def delete_telegram_message(bot_token: str, chat_id: str, message_id) -> bool:
     """
     Telegram guruhidagi bitta xabarni o'chiradi (masalan reklama/spam
