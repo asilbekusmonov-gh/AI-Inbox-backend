@@ -19,6 +19,7 @@ python manage.py revoke_store_owner --store "<store-uuid>"
 from django.core.management.base import BaseCommand
 
 from apps.stores.models import Store
+from apps.stores.services import revoke_store_owner
 
 
 class Command(BaseCommand):
@@ -62,17 +63,14 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"❌ Do'kon topilmadi: '{store_query}'"))
             return
 
-        if not store.tg_owner_chat_id:
+        result = revoke_store_owner(store)
+        if not result["changed"]:
             self.stdout.write(self.style.WARNING(f"⚠️ '{store.name}' do'konida hozir ega biriktirilmagan."))
             return
 
-        old_owner_chat_id = store.tg_owner_chat_id
-        store.tg_owner_chat_id = None
-        store.save(update_fields=["tg_owner_chat_id", "updated_at"])
-
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS(f"✅ Ega bo'shatildi: {store.name} (ID: {store.id})"))
-        self.stdout.write(f"   Eski Telegram chat_id: {old_owner_chat_id}")
+        self.stdout.write(f"   Eski Telegram chat_id: {result['old_chat_id']}")
         self.stdout.write(
             "   Do'kon endi 'ega yo'q' holatida — avvalgi admin havolasi "
             "(get_admin_link / create_store'dan olingan) yangi egaga qayta yuborilishi mumkin."

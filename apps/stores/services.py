@@ -20,6 +20,7 @@ from typing import Optional
 
 import httpx
 from django.conf import settings
+from django.core.cache import cache
 from django.utils import timezone
 
 from .models import Store
@@ -550,8 +551,31 @@ def disconnect_telegram_bot_from_store(store) -> dict:
     except httpx.RequestError as e:
         logger.warning(f"[Telegram Bot Disconnect] Webhook tozalab bo'lmadi (davom etiladi): {e}")
 
-    store.tg_bot_token = None
-    store.tg_bot_username = None
+    # ⚠️ BUG FIX: bu yerda avval `tg_bot_token`/`tg_bot_username` ikkisi
+    # ham `None`ga o'rnatilardi — docstring va frontend "umumiy demo botga
+    # qaytadi" deb va'da qilsa-da, HAQIQATDA do'kon HECH QANDAY botsiz
+    # qolib ketardi: `tg_bot_username` bo'sh bo'lgani uchun admin/mijoz
+    # havolalari (`get_admin_link`/`get_customer_link`) hisoblanmay,
+    # Super Admin ro'yxatida "Havolalar" tugmasi butunlay yo'qolib
+    # qolardi (jonli holatda aniqlandi). Endi haqiqatan ham MASTER
+    # tokenga qaytariladi va uning HAQIQIY username'i `getMe` orqali
+    # olinadi (xuddi `connect_telegram_bot_to_store`dagi kabi) — bu
+    # `provision_store` yangi do'kon yaratganda o'rnatadigan AYNAN shu
+    # holatga teng.
+    master_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "") or None
+    master_username = None
+    if master_token:
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                res = client.get(f"{TELEGRAM_API_BASE}{master_token}/getMe")
+                data = res.json()
+                if data.get("ok"):
+                    master_username = data["result"].get("username")
+        except httpx.RequestError as e:
+            logger.warning(f"[Telegram Bot Disconnect] Umumiy bot nomini olib bo'lmadi (davom etiladi): {e}")
+
+    store.tg_bot_token = master_token
+    store.tg_bot_username = master_username
     store.save(update_fields=["tg_bot_token", "tg_bot_token_hash", "tg_bot_username", "updated_at"])
 
     logger.info(f"[Telegram Bot Disconnect] Uzildi: store={store.name}")
@@ -691,7 +715,7 @@ class StoreProvisioningError(Exception):
     pass
 
 
-def provision_store(name: str, category_type: str, bot_username: str = "LeadNodeBot") -> dict:
+def provision_store(name: str, category_type: str, bot_username: str = "LeadNodeBot", bot_token: str = "") -> dict:
     """
     Yangi do'kon (tenant) yaratadi va admin/mijoz Telegram havolalarini
     qaytaradi.
@@ -704,23 +728,33 @@ def provision_store(name: str, category_type: str, bot_username: str = "LeadNode
     Args:
         name: Do'kon nomi
         category_type: Store.CategoryType qiymatlaridan biri
-        bot_username: Telegram bot username (@ belgisisiz)
+        bot_username: Telegram bot username (@ belgisisiz) — faqat
+            `bot_token` berilmagan holatda havolalarni hisoblash uchun
+            ishlatiladi
+        bot_token: Agar biznes egasi BOSHIDANOQ o'z shaxsiy botini
+            (@BotFather orqali yaratilgan) bergan bo'lsa — shu token
+            darhol ulanadi (`connect_telegram_bot_to_store` orqali,
+            umumiy MASTER bot bosqichi butunlay o'tkazib yuboriladi)
 
     Returns:
         {"store": Store, "admin_link": str, "customer_link": str}
 
     Raises:
-        StoreProvisioningError: nom bo'sh, yoki TELEGRAM_BOT_TOKEN sozlanmagan
+        StoreProvisioningError: nom bo'sh, TELEGRAM_BOT_TOKEN sozlanmagan,
+            yoki (bot_token berilgan bo'lsa) token yaroqsiz/band — bu holda
+            HECH NARSA yaratilmaydi (owner+store butunlay ortga qaytariladi)
     """
     import uuid as _uuid
 
     from django.contrib.auth.models import User
+    from django.db import transaction
     from django.utils.text import slugify
 
     from .models import Store
 
     name = (name or "").strip()
     bot_username = (bot_username or "LeadNodeBot").replace("@", "").strip()
+    bot_token = (bot_token or "").strip()
 
     if not name:
         raise StoreProvisioningError("Do'kon nomi bo'sh bo'lishi mumkin emas.")
@@ -732,23 +766,216 @@ def provision_store(name: str, category_type: str, bot_username: str = "LeadNode
 
     base_username = slugify(name).replace("-", "_")[:20] or "store"
     username = f"{base_username}_{_uuid.uuid4().hex[:6]}"
-    owner = User.objects.create(
-        username=username,
-        email=f"{username}@placeholder.local",
-    )
 
-    store = Store.objects.create(
-        owner=owner,
-        name=name,
-        category_type=category_type,
-        platform=Store.Platform.TELEGRAM,
-        tg_bot_token=settings.TELEGRAM_BOT_TOKEN,
-        tg_bot_username=bot_username,
-    )
+    try:
+        with transaction.atomic():
+            owner = User.objects.create(
+                username=username,
+                email=f"{username}@placeholder.local",
+            )
 
-    admin_link = f"https://t.me/{bot_username}?start=admin_{store.id}"
-    customer_link = f"https://t.me/{bot_username}?start=store_{store.id}"
+            store = Store.objects.create(
+                owner=owner,
+                name=name,
+                category_type=category_type,
+                platform=Store.Platform.TELEGRAM,
+                tg_bot_token=settings.TELEGRAM_BOT_TOKEN,
+                tg_bot_username=bot_username,
+            )
+
+            if bot_token:
+                # Muvaffaqiyatli bo'lsa, `store.tg_bot_username` Telegram
+                # `getMe`dan kelgan HAQIQIY qiymat bilan yangilanadi (pastda
+                # havolalar shu yangilangan qiymatdan hisoblanadi).
+                connect_telegram_bot_to_store(store, bot_token)
+    except ValueError as e:
+        # Token yaroqsiz/band — butun yaratish bekor qilindi, yarim-tayyor
+        # (noto'g'ri holatdagi) biznes bazada qolib ketmaydi.
+        raise StoreProvisioningError(str(e))
+
+    admin_link = f"https://t.me/{store.tg_bot_username}?start=admin_{store.id}"
+    customer_link = f"https://t.me/{store.tg_bot_username}?start=store_{store.id}"
 
     logger.info(f"[Store Provisioning] Yangi do'kon yaratildi: {store.name} (ID: {store.id})")
 
     return {"store": store, "admin_link": admin_link, "customer_link": customer_link}
+
+
+# ─────────────────────────────────────────────────────────────
+# Do'kon Hayot Sikli (Lifecycle) — Ega Boshqaruvi va Active/Suspend
+# ─────────────────────────────────────────────────────────────
+
+def set_store_active(store: "Store", is_active: bool) -> dict:
+    """
+    Do'konni to'liq faollashtiradi yoki to'xtatadi (TWA + AI bot, ikkalasi
+    ham) — `apps/stores/management/commands/set_store_access.py`'dan
+    ko'chirilgan, endi terminal buyrug'i ham, Super Admin API ham shu
+    AYNAN logikani chaqiradi.
+
+    Returns: {"changed": bool, "is_active": bool}
+    """
+    if store.is_active == is_active:
+        return {"changed": False, "is_active": store.is_active}
+
+    store.is_active = is_active
+    store.save(update_fields=["is_active", "updated_at"])
+    return {"changed": True, "is_active": store.is_active}
+
+
+def revoke_store_owner(store: "Store") -> dict:
+    """
+    Do'kon egasini bo'shatadi — faqat `tg_owner_chat_id`ni tozalaydi,
+    do'konning o'zi, ma'lumotlari va sozlamalari o'zgarmaydi.
+    `apps/stores/management/commands/revoke_store_owner.py`'dan ko'chirilgan.
+
+    Bo'shatilgandan so'ng, avval generatsiya qilingan admin havolasi qayta
+    ishlatilishi mumkin — u do'kon ID'siga bog'langan, egaga emas.
+
+    Returns: {"changed": bool, "old_chat_id": str | None}
+    """
+    if not store.tg_owner_chat_id:
+        return {"changed": False, "old_chat_id": None}
+
+    old_chat_id = store.tg_owner_chat_id
+    store.tg_owner_chat_id = None
+    store.save(update_fields=["tg_owner_chat_id", "updated_at"])
+    return {"changed": True, "old_chat_id": old_chat_id}
+
+
+# ─────────────────────────────────────────────────────────────
+# Bot / Webhook Sog'ligini Tekshirish (Health Check)
+# ─────────────────────────────────────────────────────────────
+
+def check_store_bot_health(store: "Store") -> dict:
+    """
+    Do'konning shaxsiy botining webhook holatini Telegram'dan so'raydi
+    (`getWebhookInfo`) va natijani bazaga (`bot_health_ok`,
+    `bot_health_checked_at`, `bot_health_error`) yozadi.
+
+    ⚠️ FAQAT shaxsiy bot (store.has_own_bot) uchun ma'noga ega — umumiy
+    (master) bot ishlatuvchi do'konlar uchun chaqirilmasligi kerak
+    (umumiy botning holati platforma darajasida, `SuperAdminStatsView`
+    orqali bitta marta tekshiriladi — har bir do'kon uchun alohida
+    tekshirish shart emas, chunki token bir xil).
+
+    "Sog'lom" mezoni:
+    - Telegram token'ni tanishi kerak (`getWebhookInfo` muvaffaqiyatli).
+    - Webhook URL aniq BIZNING kutilgan manzilimizga ko'rsatilgan bo'lishi kerak.
+    - So'nggi 1 soat ichida yetkazib berish xatosi (`last_error_date`)
+      bo'lmasligi kerak — ESKI, allaqachon o'z-o'zidan tuzalgan xatoni
+      abadiy "xato" deb ko'rsatib yurmaslik uchun (masalan vaqtinchalik
+      tunnel uzilishi keyin tiklangan bo'lsa).
+
+    Returns: {"healthy": bool, "error": str}
+    """
+    import time
+
+    now = timezone.now()
+
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            res = client.get(f"{TELEGRAM_API_BASE}{store.tg_bot_token}/getWebhookInfo")
+        data = res.json()
+    except httpx.RequestError as e:
+        healthy, error = False, f"Tarmoq xatosi: {e}"
+        store.bot_health_ok = healthy
+        store.bot_health_error = error[:255]
+        store.bot_health_checked_at = now
+        store.save(update_fields=["bot_health_ok", "bot_health_error", "bot_health_checked_at"])
+        return {"healthy": healthy, "error": error}
+
+    if not data.get("ok"):
+        healthy, error = False, data.get("description", "Noma'lum xato")
+    else:
+        result = data.get("result", {})
+        public_url = (getattr(settings, "PUBLIC_URL", "") or "").rstrip("/")
+        expected_webhook = f"{public_url}/webhook/telegram/{store.tg_bot_token}/"
+        actual_url = result.get("url", "")
+        last_error_message = result.get("last_error_message")
+        last_error_date = result.get("last_error_date")
+
+        if not actual_url:
+            healthy, error = False, "Webhook o'rnatilmagan"
+        elif public_url and actual_url != expected_webhook:
+            healthy, error = False, f"Webhook boshqa manzilga ko'rsatilgan: {actual_url}"
+        elif last_error_message and last_error_date and (time.time() - last_error_date) < 3600:
+            healthy, error = False, last_error_message
+        else:
+            healthy, error = True, ""
+
+    store.bot_health_ok = healthy
+    store.bot_health_error = error[:255]
+    store.bot_health_checked_at = now
+    store.save(update_fields=["bot_health_ok", "bot_health_error", "bot_health_checked_at"])
+    return {"healthy": healthy, "error": error}
+
+
+def _get_master_bot_live_status() -> dict:
+    """
+    Umumiy (master) bot ishlatuvchi BARCHA do'konlar bitta jonli
+    natijani ulashadi — shuning uchun 60 soniyaga keshlanadi (har bir
+    TWA sahifa yuklanishida Telegram'ga alohida so'rov yubormaslik
+    uchun). ⚠️ `apps.webhooks.views.webhook_health`dan ATAYLAB
+    MUSTAQIL — u yerda egalarga ogohlantirish yuborish side-effect'i
+    bor, bu yerga tegmaslik uchun bu funksiya shunchaki o'qish uchun,
+    hech qanday xabar yubormaydi.
+    """
+    cache_key = "master_bot_live_status"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    healthy, error = False, "Bot sozlanmagan"
+    bot_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+    if bot_token:
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                res = client.get(f"{TELEGRAM_API_BASE}{bot_token}/getMe")
+            data = res.json()
+            healthy = res.status_code == 200 and bool(data.get("ok"))
+            error = "" if healthy else "Umumiy bot bilan aloqa yo'q"
+        except httpx.RequestError:
+            healthy, error = False, "Umumiy bot bilan aloqa yo'q"
+
+    result = {"healthy": healthy, "error": error}
+    cache.set(cache_key, result, timeout=60)
+    return result
+
+
+def get_store_ai_status(store: "Store") -> dict:
+    """
+    Biznes egasi TWA dashboardidagi "AI Assistant" kartasi uchun — bu
+    do'kon HAQIQATDA ishlatayotgan botning holati (shaxsiy bot bo'lsa
+    o'zining 20-daqiqalik davriy tekshiruvi, `check_all_bot_health`
+    Celery Beat vazifasi orqali allaqachon bazaga yozilgan; umumiy bot
+    bo'lsa — qisqa keshlangan jonli tekshiruv).
+
+    Returns: {"healthy": bool|None, "error": str|None, "checked_at": datetime|None,
+              "last_activity_at": datetime|None, "uses_own_bot": bool}
+    """
+    from apps.chat.models import ChatMessage
+
+    last_activity_at = (
+        ChatMessage.objects.filter(store=store, is_deleted=False)
+        .order_by("-created_at")
+        .values_list("created_at", flat=True)
+        .first()
+    )
+
+    if store.has_own_bot:
+        return {
+            "healthy": store.bot_health_ok,
+            "error": store.bot_health_error or None,
+            "checked_at": store.bot_health_checked_at,
+            "last_activity_at": last_activity_at,
+            "uses_own_bot": True,
+        }
+
+    live = _get_master_bot_live_status()
+    return {
+        "healthy": live["healthy"],
+        "error": live["error"] or None,
+        "checked_at": timezone.now(),
+        "last_activity_at": last_activity_at,
+        "uses_own_bot": False,
+    }

@@ -2,6 +2,7 @@
 Store Views — DRF (Multi-tenant)
 """
 import logging
+from datetime import timedelta
 
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
@@ -14,9 +15,13 @@ from .serializers import (
     StoreStaffMemberSerializer,
     SuperAdminBusinessListSerializer,
     SuperAdminBusinessCreateSerializer,
+    SuperAdminBusinessDetailSerializer,
+    SuperAdminSubscriptionPlanUpdateSerializer,
+    SuperAdminTokenConnectSerializer,
+    SuperAdminDeleteReauthSerializer,
     validate_item_metadata,
 )
-from .models import StoreStaffMember
+from .models import Store, StoreStaffMember
 from apps.core.authentication import get_store_from_request
 
 logger = logging.getLogger("apps.stores")
@@ -163,10 +168,29 @@ class SuperAdminStatsView(APIView):
 
         total_stores = Store.objects.filter(is_deleted=False).count()
         active_stores = Store.objects.filter(is_active=True, is_deleted=False).count()
+        disabled_stores = total_stores - active_stores
+        free_stores = Store.objects.filter(is_deleted=False, subscription_plan=Store.SubscriptionPlan.FREE).count()
+        paid_stores = total_stores - free_stores
+        # Davriy tekshiruv (apps/stores/tasks.py check_all_bot_health) oxirgi
+        # marta XATO topgan bizneslar soni — "bot_health_ok=None" (hali
+        # tekshirilmagan) bunga kirmaydi, faqat ANIQ False.
+        stores_with_bot_errors = Store.objects.filter(is_deleted=False, bot_health_ok=False).count()
+        now = _timezone.now()
+        stores_subscription_expiring_soon = Store.objects.filter(
+            is_deleted=False, is_active=True,
+            subscription_ends_at__gte=now, subscription_ends_at__lte=now + timedelta(days=7),
+        ).count()
+        stores_subscription_expired = Store.objects.filter(
+            is_deleted=False, is_active=True, subscription_ends_at__lt=now,
+        ).count()
         total_leads = Lead.objects.filter(is_deleted=False).count()
         total_customers = Customer.objects.filter(is_deleted=False).count()
+        # ⚠️ BUG FIX: `_timezone.now().date()` UTC sanasini beradi, mahalliy
+        # (Asia/Tashkent, UTC+5) sanani emas — `apps/orders/views.py`dagi
+        # xuddi shu xato bilan bir xil sabab (jonli tekshirishda aniqlandi,
+        # u yerda ham tuzatilgan). `timezone.localtime()` to'g'ri sanani beradi.
         leads_today = Lead.objects.filter(
-            is_deleted=False, created_at__date=_timezone.now().date(),
+            is_deleted=False, created_at__date=_timezone.localtime(_timezone.now()).date(),
         ).count()
 
         # Bot health check
@@ -203,6 +227,12 @@ class SuperAdminStatsView(APIView):
         return Response({
             "total_stores": total_stores,
             "active_stores": active_stores,
+            "disabled_stores": disabled_stores,
+            "free_stores": free_stores,
+            "paid_stores": paid_stores,
+            "stores_with_bot_errors": stores_with_bot_errors,
+            "stores_subscription_expiring_soon": stores_subscription_expiring_soon,
+            "stores_subscription_expired": stores_subscription_expired,
             "total_leads": total_leads,
             "total_customers": total_customers,
             "leads_today": leads_today,
@@ -410,15 +440,57 @@ class SuperAdminBusinessListCreateView(generics.ListCreateAPIView):
 
         search = self.request.query_params.get("search", "").strip()
         if search:
-            qs = qs.filter(name__icontains=search)
+            # ⚠️ Faqat biznes nomi emas — egasining Telegram @username'i
+            # (Customer.username, xuddi SuperAdminBusinessDetailSerializer
+            # TWA kirish bo'limida qilgani kabi) va raw chat_id bo'yicha
+            # ham qidirish mumkin bo'lishi kerak (spec: "Business name,
+            # Username, TWA owner, Other useful identifiers").
+            from apps.customers.models import Customer
+
+            owner_chat_ids_by_username = Customer.objects.filter(
+                username__icontains=search,
+            ).values_list("platform_user_id", flat=True)
+
+            qs = qs.filter(
+                Q(name__icontains=search)
+                | Q(tg_owner_chat_id__icontains=search)
+                | Q(tg_owner_chat_id__in=list(owner_chat_ids_by_username))
+            )
 
         is_active = self.request.query_params.get("is_active")
         if is_active is not None:
             qs = qs.filter(is_active=is_active.lower() == "true")
 
+        # "has_token=false" — shaxsiy bot tokeni ulanmagan (hali ham
+        # umumiy MASTER tokendan foydalanayotgan) bizneslarni ajratadi.
+        # ⚠️ `tg_bot_token` shifrlangan (Fernet) — shu sabab ORM'da
+        # to'g'ridan-to'g'ri tenglikni solishtirib bo'lmaydi (har safar
+        # boshqa shifrlangan natija). Shu uchun deterministik
+        # `tg_bot_token_hash` ustuni ishlatiladi (xuddi
+        # `_get_store_by_token`dagi kabi).
+        has_token = self.request.query_params.get("has_token")
+        if has_token is not None:
+            from apps.core.fields import sha256_hex
+
+            master_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+            master_hash = sha256_hex(master_token) if master_token else None
+            if has_token.lower() == "false":
+                qs = qs.filter(Q(tg_bot_token_hash__isnull=True) | Q(tg_bot_token_hash="") | Q(tg_bot_token_hash=master_hash))
+            else:
+                qs = qs.exclude(Q(tg_bot_token_hash__isnull=True) | Q(tg_bot_token_hash="") | Q(tg_bot_token_hash=master_hash))
+
+        # "bot_error=true" — davriy tekshiruv (apps/stores/tasks.py
+        # check_all_bot_health) oxirgi marta XATO topgan bizneslarni
+        # ajratadi. `bot_health_ok=None` (hali tekshirilmagan — masalan
+        # umumiy bot ishlatadigan) bunga kirmaydi, faqat ANIQ `False`.
+        if self.request.query_params.get("bot_error", "").lower() == "true":
+            qs = qs.filter(bot_health_ok=False)
+
         return qs
 
     def create(self, request, *args, **kwargs):
+        from apps.audit.models import AuditLog
+        from apps.audit.services import log_action
         from apps.stores.services import StoreProvisioningError, provision_store
 
         serializer = self.get_serializer(data=request.data)
@@ -430,12 +502,344 @@ class SuperAdminBusinessListCreateView(generics.ListCreateAPIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         store = result["store"]
+        log_action(
+            actor=request.user, action=AuditLog.Action.BUSINESS_CREATED, store=store,
+            metadata={"category_type": store.category_type, "has_own_bot": store.has_own_bot},
+        )
         return Response({
             "id": str(store.id),
             "name": store.name,
             "admin_link": result["admin_link"],
             "customer_link": result["customer_link"],
         }, status=status.HTTP_201_CREATED)
+
+
+def _get_active_store_or_none(pk):
+    try:
+        return Store.objects.get(pk=pk, is_deleted=False)
+    except (Store.DoesNotExist, ValueError, TypeError):
+        return None
+
+
+class SuperAdminBusinessDetailView(APIView):
+    """
+    Super Admin — bitta biznesning to'liq tafsilotlari.
+    GET /api/v1/superadmin/businesses/<uuid:pk>/
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request, pk):
+        store = _get_active_store_or_none(pk)
+        if not store:
+            return Response({"error": "Biznes topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(SuperAdminBusinessDetailSerializer(store).data, status=status.HTTP_200_OK)
+
+
+class SuperAdminBusinessDisableView(APIView):
+    """Super Admin — biznesni vaqtincha to'xtatish (TWA + AI bot). POST .../disable/"""
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, pk):
+        from apps.audit.models import AuditLog
+        from apps.audit.services import log_action
+        from apps.stores.services import set_store_active
+
+        store = _get_active_store_or_none(pk)
+        if not store:
+            return Response({"error": "Biznes topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        result = set_store_active(store, False)
+        if result["changed"]:
+            log_action(actor=request.user, action=AuditLog.Action.BUSINESS_DISABLED, store=store)
+        return Response({"success": True, "is_active": result["is_active"]}, status=status.HTTP_200_OK)
+
+
+class SuperAdminBusinessReactivateView(APIView):
+    """Super Admin — vaqtincha to'xtatilgan biznesni qayta faollashtirish. POST .../reactivate/"""
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, pk):
+        from apps.audit.models import AuditLog
+        from apps.audit.services import log_action
+        from apps.stores.services import set_store_active
+
+        store = _get_active_store_or_none(pk)
+        if not store:
+            return Response({"error": "Biznes topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        result = set_store_active(store, True)
+        if result["changed"]:
+            log_action(actor=request.user, action=AuditLog.Action.BUSINESS_REACTIVATED, store=store)
+        return Response({"success": True, "is_active": result["is_active"]}, status=status.HTTP_200_OK)
+
+
+def _compute_admin_link(store) -> str | None:
+    if not store.tg_bot_username:
+        return None
+    return f"https://t.me/{store.tg_bot_username}?start=admin_{store.id}"
+
+
+class SuperAdminTWAAccessRevokeView(APIView):
+    """
+    Super Admin — hozirgi TWA egasini bo'shatish (`tg_owner_chat_id`ni
+    tozalash). Do'konning o'zi, ma'lumotlari va sozlamalari o'zgarmaydi.
+    POST .../access/revoke/
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, pk):
+        from apps.audit.models import AuditLog
+        from apps.audit.services import log_action
+        from apps.stores.services import revoke_store_owner
+
+        store = _get_active_store_or_none(pk)
+        if not store:
+            return Response({"error": "Biznes topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        result = revoke_store_owner(store)
+        if not result["changed"]:
+            return Response({"error": "Bu biznesda hozir ega biriktirilmagan."}, status=status.HTTP_400_BAD_REQUEST)
+
+        log_action(actor=request.user, action=AuditLog.Action.TWA_ACCESS_REVOKED, store=store)
+        return Response({"success": True, "admin_link": _compute_admin_link(store)}, status=status.HTTP_200_OK)
+
+
+class SuperAdminTWAAccessRestoreView(APIView):
+    """
+    Super Admin — bo'shatilgan TWA kirish huquqini "tiklash": yangi
+    (yoki eski) foydalanuvchi admin havolasini qayta bosishi uchun uni
+    qayta ko'rsatadi. Haqiqiy DB o'zgarishi yo'q — chunki bog'lash
+    Telegram tomonidan `/start admin_<uuid>` bosilganda avtomatik sodir
+    bo'ladi (`apps/webhooks/tasks.py`). Faqat biznes HOZIR egasiz
+    bo'lgandagina ma'noga ega.
+    POST .../access/restore/
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, pk):
+        from apps.audit.models import AuditLog
+        from apps.audit.services import log_action
+
+        store = _get_active_store_or_none(pk)
+        if not store:
+            return Response({"error": "Biznes topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        if store.tg_owner_chat_id:
+            return Response(
+                {"error": "Bu biznesda hozir ega bor — avval 'Bekor qilish' (revoke) qiling."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        log_action(actor=request.user, action=AuditLog.Action.TWA_ACCESS_RESTORED, store=store)
+        return Response({"success": True, "admin_link": _compute_admin_link(store)}, status=status.HTTP_200_OK)
+
+
+class SuperAdminTWAAccessChangeOwnerView(APIView):
+    """
+    Super Admin — TWA foydalanuvchisini majburan almashtirish: hozirgi
+    egani (agar bor bo'lsa) bo'shatadi va admin havolasini qaytaradi —
+    yangi foydalanuvchi shu havolani bosganda avtomatik bog'lanadi.
+    POST .../access/change-owner/
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, pk):
+        from apps.audit.models import AuditLog
+        from apps.audit.services import log_action
+        from apps.stores.services import revoke_store_owner
+
+        store = _get_active_store_or_none(pk)
+        if not store:
+            return Response({"error": "Biznes topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        revoke_store_owner(store)  # unconditional — o'zgarish bo'lmasa ham davom etadi
+        log_action(actor=request.user, action=AuditLog.Action.TWA_ACCESS_CHANGED, store=store)
+        return Response({"success": True, "admin_link": _compute_admin_link(store)}, status=status.HTTP_200_OK)
+
+
+class SuperAdminTokenConnectView(APIView):
+    """
+    Super Admin — biznesga shaxsiy Telegram bot tokenini ulash (egasi
+    o'rniga administrator tomonidan). Mavjud `connect_telegram_bot_to_store`
+    xizmat funksiyasini o'zgarishsiz chaqiradi.
+    POST .../token/connect/  body: {"bot_token": "..."}
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, pk):
+        from apps.audit.models import AuditLog
+        from apps.audit.services import log_action
+        from apps.stores.services import connect_telegram_bot_to_store
+
+        store = _get_active_store_or_none(pk)
+        if not store:
+            return Response({"error": "Biznes topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = SuperAdminTokenConnectSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            result = connect_telegram_bot_to_store(store, serializer.validated_data["bot_token"])
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"[SuperAdmin] Token ulashda kutilmagan xato: {e}", exc_info=True)
+            return Response({"error": "Telegram bilan ulanishda kutilmagan xato yuz berdi"}, status=status.HTTP_502_BAD_GATEWAY)
+
+        log_action(
+            actor=request.user, action=AuditLog.Action.TOKEN_CONNECTED, store=store,
+            metadata={"bot_username": result.get("bot_username")},
+        )
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class SuperAdminTokenDisconnectView(APIView):
+    """
+    Super Admin — biznesning shaxsiy bot tokenini uzish (umumiy demo
+    botga qaytaradi). POST .../token/disconnect/
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, pk):
+        from apps.audit.models import AuditLog
+        from apps.audit.services import log_action
+        from apps.stores.services import disconnect_telegram_bot_from_store
+
+        store = _get_active_store_or_none(pk)
+        if not store:
+            return Response({"error": "Biznes topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        result = disconnect_telegram_bot_from_store(store)
+        log_action(actor=request.user, action=AuditLog.Action.TOKEN_DISCONNECTED, store=store)
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class SuperAdminSubscriptionPlanView(APIView):
+    """Super Admin — biznesning obuna rejasini o'zgartirish. PATCH .../subscription/"""
+    permission_classes = [permissions.IsAdminUser]
+
+    def patch(self, request, pk):
+        from apps.audit.models import AuditLog
+        from apps.audit.services import log_action
+
+        store = _get_active_store_or_none(pk)
+        if not store:
+            return Response({"error": "Biznes topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = SuperAdminSubscriptionPlanUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        update_fields = ["updated_at"]
+        old_plan = store.subscription_plan
+        if "subscription_plan" in data:
+            store.subscription_plan = data["subscription_plan"]
+            update_fields.append("subscription_plan")
+        if "monthly_message_limit" in data:
+            store.monthly_message_limit = data["monthly_message_limit"]
+            update_fields.append("monthly_message_limit")
+
+        old_ends_at = store.subscription_ends_at
+        if "subscription_ends_at" in data:
+            store.subscription_ends_at = data["subscription_ends_at"]
+            update_fields.append("subscription_ends_at")
+        store.save(update_fields=update_fields)
+
+        if "subscription_plan" in data:
+            log_action(
+                actor=request.user, action=AuditLog.Action.SUBSCRIPTION_PLAN_CHANGED, store=store,
+                metadata={"old_plan": old_plan, "new_plan": store.subscription_plan},
+            )
+        if "subscription_ends_at" in data:
+            log_action(
+                actor=request.user, action=AuditLog.Action.SUBSCRIPTION_DATE_CHANGED, store=store,
+                metadata={
+                    "old_ends_at": old_ends_at.isoformat() if old_ends_at else None,
+                    "new_ends_at": store.subscription_ends_at.isoformat() if store.subscription_ends_at else None,
+                },
+            )
+        return Response(
+            {
+                "subscription_plan": store.subscription_plan,
+                "monthly_message_limit": store.monthly_message_limit,
+                "subscription_ends_at": store.subscription_ends_at,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class SuperAdminBusinessStatisticsView(APIView):
+    """
+    Super Admin — bitta biznesning to'liq voronka statistikasi (oylik
+    dinamika bilan) — "Statistika" sahifasi uchun.
+    GET /api/v1/superadmin/businesses/<uuid:pk>/statistics/
+
+    ⚠️ Javob shakli `LeadViewSet.stats` (do'kon egasining o'z TWA'si)
+    bilan AYNAN bir xil — ikkisi ham `apps.orders.services.compute_store_funnel_stats`
+    AYNAN shu funksiyasini chaqiradi, mantiq takrorlanmaydi.
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request, pk):
+        from apps.orders.services import compute_store_funnel_stats
+
+        store = _get_active_store_or_none(pk)
+        if not store:
+            return Response({"error": "Biznes topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        stats = compute_store_funnel_stats(store)
+        return Response({"store_id": str(store.id), "store_name": store.name, **stats})
+
+
+class SuperAdminBusinessDeleteView(APIView):
+    """
+    Super Admin — biznesni BUTUNLAY o'chirish (soft-delete, hech qanday
+    "qayta tiklash" tugmasi UI'da yo'q — amalda qaytarib bo'lmaydigan).
+    POST /api/v1/superadmin/businesses/<uuid:pk>/delete/
+    Body: {"username": "...", "password": "..."}
+
+    ⚠️ ENG XAVFLI amal — shuning uchun ikki qatlamli himoya:
+    1. `IsAdminUser` — chaqiruvchi sessiya allaqachon platforma xodimi
+       bo'lishi kerak (boshqa barcha SuperAdmin view'lar bilan bir xil).
+    2. Qo'shimcha parol bilan qayta tasdiqlash — HOZIRGI sessiyadan
+       MUSTAQIL (`request.user`ga emas, faqat `authenticate()`ga
+       tayanadi), chunki Telegram orqali kirgan sessiyalarda parol
+       UMUMAN yo'q (unusable password) — ular ham shu amalni, boshqa
+       (parolga ega) xodim hisobi bilan tasdiqlab, bajara olishi kerak.
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, pk):
+        from django.contrib.auth import authenticate
+
+        from apps.audit.models import AuditLog
+        from apps.audit.services import log_action
+
+        store = _get_active_store_or_none(pk)
+        if not store:
+            return Response({"error": "Biznes topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = SuperAdminDeleteReauthSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        reauth_user = authenticate(
+            username=serializer.validated_data["username"],
+            password=serializer.validated_data["password"],
+        )
+        if reauth_user is None or not reauth_user.is_staff:
+            return Response(
+                {"error": "Login yoki parol noto'g'ri, yoki bu hisob platforma xodimi emas."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        store_name = store.name
+        store.soft_delete()
+
+        log_action(
+            actor=request.user, action=AuditLog.Action.BUSINESS_DELETED, store=store,
+            metadata={"deleted_business_name": store_name, "reauth_username": reauth_user.username},
+        )
+        return Response({"success": True}, status=status.HTTP_200_OK)
 
 
 class InstagramConnectView(APIView):
@@ -596,6 +1000,25 @@ class TelegramBotDisconnectView(APIView):
 
         result = disconnect_telegram_bot_from_store(store)
         return Response(result, status=status.HTTP_200_OK)
+
+
+class StoreAIStatusView(APIView):
+    """
+    Biznes egasi TWA dashboardidagi "AI Assistant" holat kartasi uchun —
+    "Mening AI'im ishlayaptimi? Telegram ulanishim sog'lommi?" savoliga
+    bitta aniq javob.
+
+    GET /api/v1/store/ai-status/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        store = get_store_from_request(request)
+        if not store:
+            return Response({"error": "Do'kon topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        from .services import get_store_ai_status
+        return Response(get_store_ai_status(store), status=status.HTTP_200_OK)
 
 
 class TelegramGroupDisconnectView(APIView):

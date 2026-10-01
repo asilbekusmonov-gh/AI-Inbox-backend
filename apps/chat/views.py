@@ -341,7 +341,15 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
         from datetime import timedelta
 
         now = timezone.now()
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        # ⚠️ BUG FIX: `now.replace(hour=0,...)` UTC yarim tunini beradi,
+        # mahalliy (Asia/Tashkent, UTC+5) yarim tunini emas — xuddi
+        # `apps/orders/views.py`/`apps/stores/views.py`dagi bilan bir xil
+        # xato (jonli tekshirishda topilgan). Natijada kunlik broadcast
+        # limiti haqiqiy mahalliy kundan ~5 soat KATTAROQ oynada
+        # hisoblanib, egani vaqtidan oldin "limit tugadi" deb to'xtatib
+        # qo'yishi mumkin edi. `timezone.localtime()` to'g'ri mahalliy
+        # yarim tunni beradi.
+        today_start = timezone.localtime(now).replace(hour=0, minute=0, second=0, microsecond=0)
         week_start = now - timedelta(days=7)
 
         daily_count = BroadcastCampaign.objects.filter(store=target_store, created_at__gte=today_start).count()

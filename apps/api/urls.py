@@ -28,9 +28,21 @@ from apps.stores.views import (
     SuperAdminStatsView,
     SuperAdminMeView,
     SuperAdminBusinessListCreateView,
+    SuperAdminBusinessDetailView,
+    SuperAdminBusinessDisableView,
+    SuperAdminBusinessReactivateView,
+    SuperAdminTWAAccessRevokeView,
+    SuperAdminTWAAccessRestoreView,
+    SuperAdminTWAAccessChangeOwnerView,
+    SuperAdminTokenConnectView,
+    SuperAdminTokenDisconnectView,
+    SuperAdminSubscriptionPlanView,
+    SuperAdminBusinessStatisticsView,
+    SuperAdminBusinessDeleteView,
     SuperAdminTelegramLoginView,
     SuperAdminTelegramLogoutView,
 )
+from apps.audit.views import SuperAdminAuditLogListView, SuperAdminPlatformErrorListView
 from apps.webhooks.views import webhook_health
 
 app_name = "api_v1"
@@ -55,6 +67,19 @@ urlpatterns = [
     path("superadmin/stats/", SuperAdminStatsView.as_view(), name="superadmin_stats"),
     path("superadmin/me/", SuperAdminMeView.as_view(), name="superadmin_me"),
     path("superadmin/businesses/", SuperAdminBusinessListCreateView.as_view(), name="superadmin_businesses"),
+    path("superadmin/businesses/<uuid:pk>/", SuperAdminBusinessDetailView.as_view(), name="superadmin_business_detail"),
+    path("superadmin/businesses/<uuid:pk>/disable/", SuperAdminBusinessDisableView.as_view(), name="superadmin_business_disable"),
+    path("superadmin/businesses/<uuid:pk>/reactivate/", SuperAdminBusinessReactivateView.as_view(), name="superadmin_business_reactivate"),
+    path("superadmin/businesses/<uuid:pk>/access/revoke/", SuperAdminTWAAccessRevokeView.as_view(), name="superadmin_access_revoke"),
+    path("superadmin/businesses/<uuid:pk>/access/restore/", SuperAdminTWAAccessRestoreView.as_view(), name="superadmin_access_restore"),
+    path("superadmin/businesses/<uuid:pk>/access/change-owner/", SuperAdminTWAAccessChangeOwnerView.as_view(), name="superadmin_access_change_owner"),
+    path("superadmin/businesses/<uuid:pk>/token/connect/", SuperAdminTokenConnectView.as_view(), name="superadmin_token_connect"),
+    path("superadmin/businesses/<uuid:pk>/token/disconnect/", SuperAdminTokenDisconnectView.as_view(), name="superadmin_token_disconnect"),
+    path("superadmin/businesses/<uuid:pk>/subscription/", SuperAdminSubscriptionPlanView.as_view(), name="superadmin_subscription"),
+    path("superadmin/businesses/<uuid:pk>/statistics/", SuperAdminBusinessStatisticsView.as_view(), name="superadmin_business_statistics"),
+    path("superadmin/businesses/<uuid:pk>/delete/", SuperAdminBusinessDeleteView.as_view(), name="superadmin_business_delete"),
+    path("superadmin/audit-log/", SuperAdminAuditLogListView.as_view(), name="superadmin_audit_log"),
+    path("superadmin/platform-errors/", SuperAdminPlatformErrorListView.as_view(), name="superadmin_platform_errors"),
     path("superadmin/telegram-login/", SuperAdminTelegramLoginView.as_view(), name="superadmin_telegram_login"),
     path("superadmin/telegram-logout/", SuperAdminTelegramLogoutView.as_view(), name="superadmin_telegram_logout"),
 ]

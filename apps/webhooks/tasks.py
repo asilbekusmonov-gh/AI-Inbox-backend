@@ -26,6 +26,16 @@ from django.db import IntegrityError
 
 logger = logging.getLogger("apps.webhooks")
 
+# ⚠️ Guruhda botning O'ZI qancha tez-tez yozishini cheklash (foydalanuvchi
+# aytgan "guruhni savdo kanaliga aylantirmaslik" tamoyili) — bu mijozning
+# so'rov chastotasini cheklaydigan `check_rate_limit`dan (ai_service.py)
+# MUSTAQIL: u BITTA mijozni cheklaydi, bu esa bitta GURUHga botning
+# qancha-qancha xabar tushishini cheklaydi (turli mijozlar ketma-ket
+# savol bersa ham). Guruhga to'g'ridan-to'g'ri (@mention/reply) qaratilgan
+# savollar BU cheklovdan chetlanadi — aniq so'ralgan savolga javobsiz
+# qolib ketish yomonroq.
+GROUP_REPLY_COOLDOWN_SECONDS = 20
+
 # ⚠️ Guruh spam/reklama tozalash (foydalanuvchi so'ragan funksiya):
 # faqat ANIQ, ob'ektiv signallar tekshiriladi — xato pozitiv (haqiqiy
 # mijoz savolini spam deb o'chirib yuborish) narxi juda yuqori, shuning
@@ -266,7 +276,7 @@ def process_incoming_message(
     - Lid aniqlansa — Lead yaratadi va egasiga xabar yuboradi
     """
     from apps.stores.models import Store
-    from apps.customers.models import Customer
+    from apps.customers.models import Customer, CustomerSession
     from apps.chat.models import ChatMessage
     from apps.chat.ai_service import get_ai_response
     from apps.chat.senders import send_reply
@@ -585,9 +595,23 @@ def process_incoming_message(
                     role__in=[ChatMessage.Role.USER, ChatMessage.Role.ASSISTANT],
                 ).exists()
 
-                if has_group_bridge_context:
+                # ⚠️ "Issiq lid" tez yo'li: guruhdagi "Ro'yxatdan o'tish"
+                # havolasi (register_<uuid>) orqali kirgan bo'lsa, statik
+                # "xush kelibsiz" shablon o'rniga ham AI oqimiga tushiramiz
+                # — shunda apps/chat/ai_service.py'dagi fast-path
+                # bo'limi (CustomerSession.entry_mode) darhol ism+telefon
+                # so'rashni boshlaydi, umumiy "qanday yordam bera olaman"
+                # bilan bir bosqich yo'qotilmaydi.
+                from apps.customers.models import CustomerSession
+
+                is_fast_track_entry = CustomerSession.objects.filter(
+                    platform_user_id=sender_id, entry_mode=CustomerSession.EntryMode.REGISTER,
+                ).exists()
+
+                if has_group_bridge_context or is_fast_track_entry:
                     logger.info(
-                        "[Task] Mijoz guruhdan ko'prik orqali keldi -> statik "
+                        "[Task] Mijoz guruhdan ko'prik orqali yoki tez-yo'l "
+                        "ro'yxatdan o'tish havolasi orqali keldi -> statik "
                         "salomlashish o'rniga AI'ga to'g'ridan-to'g'ri javob berdiriladi"
                     )
                     text = "Salom"
@@ -989,6 +1013,13 @@ def process_incoming_message(
                     processing_status=ChatMessage.ProcessingStatus.FAILED,
                     error_message=f"AI javob berolmadi ({error_reason})",
                 )
+                from apps.audit.services import log_platform_error
+                log_platform_error(
+                    source="ai_service",
+                    message=f"AI javob berolmadi ({error_reason})",
+                    store=store,
+                    metadata={"error_type": ai_response.error_type, "chat_message_id": str(chat_message.id)},
+                )
                 if store.tg_owner_chat_id and store.tg_bot_token:
                     cooldown_key = f"ai_error_alert_sent:{store.id}:{ai_response.error_type}"
                     if cache.add(cooldown_key, True, timeout=60 * 60):
@@ -1143,35 +1174,45 @@ def process_incoming_message(
                     )
                     return
 
-            # ── 6. Javobni platforma orqali yuborish ──────────────────────
-            # ⚠️ Guruhda bir nechta odam yozib turishi mumkin — javobni oddiy
-            # xabar sifatida yuborsak, kim so'ragani va botning kimga javob
-            # berayotgani chalkashib qolardi. Shaxsiy chatda esa reply shart
-            # emas (faqat 1 kishi bilan suhbat).
-            sent = send_reply(
-                store=store,
-                platform=platform,
-                chat_id=chat_id,
-                text=ai_response.text,
-                customer=customer,
-                reply_to_message_id=message_id if is_group else None,
+                # ── 5.7. Guruhda botning o'z xabarlari orasida sovutish
+                # (cooldown) — guruh "savdo kanaliga" aylanib ketmasligi
+                # uchun, bot ketma-ket qisqa vaqt ichida bir nechta xabar
+                # yubormaydi. To'g'ridan-to'g'ri @mention/reply qilingan
+                # aniq savol bu cheklovdan chetlanadi — aniq so'ralgan
+                # savol har doim javobsiz qolmasligi kerak.
+                if not _is_message_addressed_to_bot(raw_payload, store):
+                    cooldown_key = f"group_reply_cooldown:{store.id}:{chat_id}"
+                    if not cache.add(cooldown_key, True, timeout=GROUP_REPLY_COOLDOWN_SECONDS):
+                        logger.info(
+                            f"[Task] Guruhda bot sovutish vaqtida — AI javobi yuborilmadi | store={store.name}"
+                        )
+                        return
+                else:
+                    cache.set(f"group_reply_cooldown:{store.id}:{chat_id}", True, timeout=GROUP_REPLY_COOLDOWN_SECONDS)
+
+            # ── 6. Lid aniqlangan bo'lsa — javobni YUBORISHDAN OLDIN Lead
+            # HAQIQATDA saqlanganini tekshiramiz.
+            # ⚠️ Avval bu tekshiruv javob YUBORILGANDAN KEYIN bo'lardi —
+            # ya'ni mijoz AI'ning "ma'lumotlaringiz qabul qilindi" kabi
+            # matnini ALLAQACHON ko'rgan bo'lardi, Lead esa muvaffaqiyatsiz
+            # bo'lsa ham mijoz buni faqat KEYINGI, alohida xabardan bilardi.
+            # Endi tekshiruv OLDIN: muvaffaqiyatsiz bo'lsa, mijozga AI matni
+            # O'RNIGA to'g'ridan-to'g'ri tuzatish matni yuboriladi (ikki
+            # ketma-ket xabar emas, darhol to'g'ri bitta xabar).
+            _LEAD_FAILURE_TEXT = (
+                "Kechirasiz, ma'lumotlaringizni saqlashda texnik nosozlik yuz berdi 🙏 "
+                "Iltimos, ismingiz va telefon raqamingizni yana bir bor yuboring."
             )
+            final_text = ai_response.text
+            lead = None
+            fallback_lead = None
 
-            if not sent:
-                logger.warning(
-                    f"[Task] Javob yuborilmadi! "
-                    f"platform={platform} | chat_id={chat_id}"
-                )
-                # Yuborilmagan bo'lsa ham davom etamiz (buyurtma saqlash kerak)
-
-            # ── 7. Lid aniqlangan bo'lsa ──────────────────────────────────
             if ai_response.has_lead and ai_response.lead_data:
                 logger.info(
                     f"[Task] Lid aniqlandi! "
                     f"mijoz={ai_response.lead_data.get('full_name')} | "
                     f"lead_status={ai_response.lead_data.get('lead_status')}"
                 )
-
                 lead = create_lead_from_ai_data(
                     store=store,
                     customer=customer,
@@ -1180,39 +1221,27 @@ def process_incoming_message(
                     source="group" if is_group else "private_chat",
                     source_message=ai_message,
                 )
-
-                if lead:
-                    # Egasiga Telegram xabarnomasi
-                    notify_store_owner(store=store, lead=lead)
-                    # Bitrix24 ulangan bo'lsa — avtomatik sinxronizatsiya
-                    sync_lead_to_bitrix24(store=store, lead=lead)
-                    # Google Sheets ulangan bo'lsa — avtomatik sinxronizatsiya
-                    # (Bitrix24'dan mustaqil, ikkalasi ham bir vaqtda ishlashi mumkin)
-                    sync_lead_to_google_sheets(store=store, lead=lead)
-                else:
+                if not lead:
                     logger.warning(
                         f"[Task] Lid aniqlandi lekin saqlanmadi! "
                         f"data={ai_response.lead_data}"
                     )
+                    final_text = _LEAD_FAILURE_TEXT
 
-            # ── 7.1. Zaxira (fallback) lid yaratish ─────────────────────────
+            # ── 6.1. Zaxira (fallback) lid yaratish ─────────────────────────
             # ⚠️ Jonli holatda aniqlangan JIDDIY bug: AI javobi ikki JSON
             # blokini ("suhbat_holati" va undan keyingi "lid_malumotlari")
             # KETMA-KET bir xil `max_output_tokens` byudjetida chiqaradi.
             # Uzun sotuv matni + ikkala blok bir vaqtda sig'may qolsa, Gemini
             # javobni "lid_malumotlari" bloki O'RTASIDA kesib qo'yadi —
             # `_extract_lead_data` esa buzuq/yo'q JSON'ni jimgina `None`
-            # qaytaradi. Natijada mijoz ism+telefonini bergan, AI unga
-            # "ro'yxatdan o'tkazdim" deb yozgan bo'lsa ham, HAQIQIY Lead
-            # HECH QACHON yaratilmaydi — ega buni umuman bilmaydi (faqat
-            # log qatorida "aniqlandi lekin saqlanmadi" ko'rinadi, TWA'da
-            # yo'q). Lekin xuddi shu ism/telefon "suhbat_holati" blokidagi
-            # `memory`ga ALLAQACHON ishonchli parslanib ulgurgan bo'ladi
-            # (u JSON kesilishdan OLDIN keladi) — shundan foydalanib, agar
-            # yuqoridagi asosiy yo'l lid TOPMAGAN, lekin AI stage'ni
-            # "registered"ga o'tkazib, memory'da ism+telefon qoldirgan
-            # bo'lsa, shu ma'lumotdan Lead yaratamiz (dublikat himoyasi
-            # `create_lead_from_ai_data` ichida allaqachon bor).
+            # qaytaradi. Lekin xuddi shu ism/telefon "suhbat_holati"
+            # blokidagi `memory`ga ALLAQACHON ishonchli parslanib ulgurgan
+            # bo'ladi (u JSON kesilishdan OLDIN keladi) — shundan
+            # foydalanib, agar yuqoridagi asosiy yo'l lid TOPMAGAN, lekin
+            # AI stage'ni "registered"ga o'tkazib, memory'da ism+telefon
+            # qoldirgan bo'lsa, shu ma'lumotdan Lead yaratamiz (dublikat
+            # himoyasi `create_lead_from_ai_data` ichida allaqachon bor).
             elif ai_response.conversation_state:
                 _fallback_memory = ai_response.conversation_state.get("memory") or {}
                 _fallback_name = str(_fallback_memory.get("full_name", "")).strip()
@@ -1240,10 +1269,99 @@ def process_incoming_message(
                         source="group" if is_group else "private_chat",
                         source_message=ai_message,
                     )
-                    if fallback_lead:
-                        notify_store_owner(store=store, lead=fallback_lead)
-                        sync_lead_to_bitrix24(store=store, lead=fallback_lead)
-                        sync_lead_to_google_sheets(store=store, lead=fallback_lead)
+                    if not fallback_lead:
+                        final_text = _LEAD_FAILURE_TEXT
+
+            if final_text != ai_response.text:
+                ChatMessage.objects.filter(id=ai_message.id).update(content=final_text)
+                from apps.audit.services import log_platform_error
+                log_platform_error(
+                    source="lead_creation",
+                    message="Lid aniqlandi lekin saqlanmadi — mijozga tuzatish xabari yuborildi",
+                    store=store,
+                    metadata={"lead_data": ai_response.lead_data},
+                )
+
+            # ── 6.2. Lid manbasini boyitish (qaysi guruh/mavzudan kelgani) —
+            # agar bu mijoz avval guruhda "Ro'yxatdan o'tish" havolasi
+            # orqali belgilangan bo'lsa (pastdagi 6.4-bandda o'rnatiladi),
+            # endi (shaxsiy chatda) Lead muvaffaqiyatli yaratilganda shu
+            # kontekst uning "notes" maydoniga qo'shiladi, keyin bir
+            # martalik signal tozalanadi — operator "bu lid qayerdan
+            # kelgani"ni ko'ra oladi, statistikada ham ishlatish mumkin.
+            _final_lead = lead or fallback_lead
+            if _final_lead and not is_group:
+                _src_session = CustomerSession.objects.filter(
+                    platform_user_id=sender_id,
+                ).exclude(source_group_chat_id="").first()
+                if _src_session:
+                    _attribution = f"Manba: guruh (chat_id={_src_session.source_group_chat_id})"
+                    if _src_session.source_context:
+                        _attribution += f", mavzu: {_src_session.source_context}"
+                    _final_lead.notes = (
+                        f"{_final_lead.notes}\n{_attribution}".strip() if _final_lead.notes else _attribution
+                    )
+                    _final_lead.save(update_fields=["notes"])
+                    CustomerSession.objects.filter(id=_src_session.id).update(
+                        source_group_chat_id="", source_context="",
+                    )
+
+            # ── 7. Javobni platforma orqali yuborish ──────────────────────
+            # ⚠️ Guruhda bir nechta odam yozib turishi mumkin — javobni oddiy
+            # xabar sifatida yuborsak, kim so'ragani va botning kimga javob
+            # berayotgani chalkashib qolardi. Shaxsiy chatda esa reply shart
+            # emas (faqat 1 kishi bilan suhbat).
+            sent = send_reply(
+                store=store,
+                platform=platform,
+                chat_id=chat_id,
+                text=final_text,
+                customer=customer,
+                reply_to_message_id=message_id if is_group else None,
+            )
+
+            if not sent:
+                logger.warning(
+                    f"[Task] Javob yuborilmadi! "
+                    f"platform={platform} | chat_id={chat_id}"
+                )
+                # Yuborilmagan bo'lsa ham davom etamiz (lid/holat saqlanishi kerak)
+
+            # ── 6.4. Guruhda "Ro'yxatdan o'tish" havolasi yuborilgan bo'lsa —
+            # mijoz hali /start bosmasdan, CustomerSession'da shu guruh va
+            # mavzuni OLDINDAN belgilab qo'yamiz (6.2-band shu yerdan o'qiydi).
+            # ⚠️ `active_store`ni faqat YANGI sessiya yaratilganda o'rnatamiz —
+            # mijozning MAVJUD sessiyasi bo'lsa (masalan boshqa do'konning
+            # mijozi bo'lsa ham), uning aktiv do'konini bu yerda o'zgartirib
+            # yubormaymiz, faqat manba izini qo'shamiz.
+            if is_group and "start=register_" in final_text:
+                _topic = (
+                    (ai_response.conversation_state or {}).get("memory", {}).get("interested_product")
+                    or text[:100]
+                )
+                _existing_session = CustomerSession.objects.filter(platform_user_id=sender_id).first()
+                if _existing_session:
+                    CustomerSession.objects.filter(id=_existing_session.id).update(
+                        source_group_chat_id=str(chat_id), source_context=_topic,
+                    )
+                else:
+                    CustomerSession.objects.create(
+                        platform_user_id=sender_id, active_store=store,
+                        source_group_chat_id=str(chat_id), source_context=_topic,
+                    )
+
+            # ── 7.1. Lead muvaffaqiyatli bo'lsa — bildirishnoma/CRM
+            # sinxronizatsiyasi (sekin, tashqi API so'rovlari) — ATAYLAB
+            # javob YUBORILGANDAN KEYIN, bu amallarning kechikishi mijozga
+            # ta'sir qilmasligi uchun.
+            if lead:
+                notify_store_owner(store=store, lead=lead)
+                sync_lead_to_bitrix24(store=store, lead=lead)
+                sync_lead_to_google_sheets(store=store, lead=lead)
+            elif fallback_lead:
+                notify_store_owner(store=store, lead=fallback_lead)
+                sync_lead_to_bitrix24(store=store, lead=fallback_lead)
+                sync_lead_to_google_sheets(store=store, lead=fallback_lead)
 
             # ── 7.5. Sotuv suhbati holatini (stage/intent/lead_score/memory)
             # yangilash ──────────────────────────────────────────────────
@@ -1378,13 +1496,24 @@ def process_incoming_message(
             sender_id=sender_id,
         )
 
+        # ⚠️ BUG FIX: `self.retry(exc=e, ...)` ga `exc=` berilganda, Celery
+        # qayta urinishlar tugaganda `MaxRetriesExceededError`ni EMAS, balki
+        # ASL xatoni (`e`)ning o'zini qayta ko'taradi (bu — Celery'ning
+        # hujjatlashtirilgan, ataylab qilingan xulqi). Shu sabab pastdagi
+        # `except MaxRetriesExceededError:` banди AMALDA HECH QACHON
+        # ishlamagan — ya'ni doimiy muvaffaqiyatsiz xabar HECH QACHON
+        # `_mark_message_failed` orqali FAILED deb belgilanmagan (operator
+        # TWA Inbox'da buni "muvaffaqiyatli" yoki "kutilmoqda" deb ko'rib
+        # yurgan). Endi tugash sharti RETRY CHAQIRILISHIDAN OLDIN aniq
+        # tekshiriladi — Celery'ning o'z (ishonchsiz) exhaustion signaliga
+        # tayanilmaydi.
+        if self.request.retries >= self.max_retries:
+            _mark_message_failed(store_id, message_id, platform, str(e), sender_id=sender_id)
+            return
+
         # Eksponensial backoff: 5s → 25s → 125s
         countdown = 5 ** (self.request.retries + 1)
-
-        try:
-            raise self.retry(exc=e, countdown=countdown)
-        except MaxRetriesExceededError:
-            _mark_message_failed(store_id, message_id, platform, str(e), sender_id=sender_id)
+        raise self.retry(exc=e, countdown=countdown)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1459,6 +1588,15 @@ def _mark_message_failed(store_id, message_id, platform, error_msg, sender_id=No
         ).update(
             processing_status=ChatMessage.ProcessingStatus.FAILED,
             error_message=error_msg[:500],
+        )
+        from apps.audit.services import log_platform_error
+        from apps.audit.models import PlatformError
+        from apps.stores.models import Store
+        log_platform_error(
+            source=PlatformError.Source.CELERY_TASK,
+            message=f"Xabar barcha qayta urinishlardan keyin ham ishlov berilmadi: {error_msg}",
+            store=Store.objects.filter(id=store_id).first(),
+            metadata={"message_id": message_id, "platform": platform},
         )
     except Exception as e:
         logger.error(f"_mark_message_failed xatosi: {e}")

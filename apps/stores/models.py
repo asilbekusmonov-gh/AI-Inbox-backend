@@ -117,6 +117,23 @@ class Store(BaseModel):
         null=True,
         help_text="Bot username (masalan: @NajotTalimBot)"
     )
+    # ⚠️ Shaxsiy botning HAQIQATDA ishlab turganini (webhook xato bermayotgan,
+    # Telegram tomonidan qabul qilinayotgan) davriy ravishda tekshirib
+    # turadigan Celery task (apps/stores/tasks.py::check_all_bot_health)
+    # natijasini saqlaydi — Super Admin "Bizneslar" ro'yxatida "Bot xatosi"
+    # filtri va biznes tafsilotlarida sog'liq ko'rsatkichi uchun.
+    # `None` — hali hech qachon tekshirilmagan (masalan umumiy bot ishlatadi).
+    bot_health_ok = models.BooleanField(
+        null=True, blank=True, default=None,
+        help_text="Oxirgi tekshiruvda bot/webhook sog'lom bo'lganmi (None — hali tekshirilmagan)",
+    )
+    bot_health_checked_at = models.DateTimeField(
+        null=True, blank=True, help_text="Oxirgi sog'liq tekshiruvi vaqti",
+    )
+    bot_health_error = models.CharField(
+        max_length=255, blank=True, default="",
+        help_text="Oxirgi tekshiruvda topilgan xato (bo'lsa)",
+    )
     tg_owner_chat_id = models.CharField(
         max_length=50,
         blank=True,
@@ -221,6 +238,43 @@ class Store(BaseModel):
         help_text="AI javobining maksimal uzunligi (token)"
     )
 
+    class CommunicationTone(models.TextChoices):
+        FRIENDLY = "friendly", "Do'stona"
+        PROFESSIONAL = "professional", "Rasmiy"
+        CASUAL = "casual", "Erkin"
+
+    communication_tone = models.CharField(
+        max_length=20,
+        choices=CommunicationTone.choices,
+        default=CommunicationTone.FRIENDLY,
+        help_text=(
+            "AI qaysi ohangda gaplashsin — xom prompt yozishga muqobil, "
+            "oddiy til bilan tanlanadigan sozlama (Sozlamalar sahifasida "
+            "tugma sifatida ko'rinadi)."
+        )
+    )
+
+    # ── Biznes ma'lumotlari (AI uchun ISHONCHLI kontekst — AI bu
+    # ma'lumotlarni o'ylab topish o'rniga shu yerdan oladi) ──────
+    working_hours = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Ish vaqti, kun bo'yicha: "
+            '{"mon": {"closed": false, "open": "09:00", "close": "18:00"}, ...}'
+        )
+    )
+    branches = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Filiallar ro\'yxati: [{"name": "...", "address": "...", "phone": "..."}]'
+    )
+    faq_items = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Tez-tez so\'raladigan savollar: [{"question": "...", "answer": "..."}]'
+    )
+
     # ── Follow-up (javobsiz qolgan mijozlarga avtomatik eslatma) ─
     follow_up_enabled = models.BooleanField(
         default=True,
@@ -246,6 +300,11 @@ class Store(BaseModel):
         choices=SubscriptionPlan.choices,
         default=SubscriptionPlan.FREE,
         help_text="Obuna rejasi"
+    )
+    subscription_ends_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Sinov muddati yoki joriy obuna tugash sanasi (Super Admin qo'lda belgilaydi)"
     )
     monthly_message_limit = models.IntegerField(
         # ⚠️ Avval 500 edi — jonli yuklama-testda eng katta simulyatsiya

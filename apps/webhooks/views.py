@@ -144,7 +144,7 @@ class TelegramWebhookView(View):
             return HttpResponse(status=200)
 
         # 4.5 Single Master Bot Multi-Tenant Routing (Deep-link & Session Router)
-        store = self._resolve_store_for_message(message)
+        store = self._resolve_store_for_message(message, bot_token)
 
         # ⚠️ XAVFSIZLIK: hech qanday do'konga aniq bog'lanmagan (havolasiz/
         # sessiyasiz kirgan BEGONA) foydalanuvchini ENDI hech qanday real
@@ -229,7 +229,7 @@ class TelegramWebhookView(View):
         # 7. Telegram 200 kutadi — muvaffaqiyatli navbatga qo'yilgach 200 qaytaramiz
         return HttpResponse(status=200)
 
-    def _resolve_store_for_message(self, message) -> Store | None:
+    def _resolve_store_for_message(self, message, bot_token: str = "") -> Store | None:
         """
         Single Master Bot Model uchun:
         /start store_123 deep-linki yoki foydalanuvchining aktiv do'kon sessiyasi bo'yicha dinamik yo'naltiradi.
@@ -261,9 +261,17 @@ class TelegramWebhookView(View):
             parts = text.split()
             if len(parts) > 1:
                 param = parts[1].strip()
-                # admin_ yoki store_ prefixini olib tashlab, faqat UUID qoldiramiz
+                # admin_ / store_ / register_ prefixini olib tashlab, faqat UUID qoldiramiz.
+                # ⚠️ "register_" — guruhda "juda issiq" (yuqori xarid niyatli) mijozga
+                # ko'rsatiladigan "Ro'yxatdan o'tish" havolasi uchun maxsus prefiks
+                # (qarang: apps/chat/ai_service.py dm_link_register_display) — bu
+                # mijoz ODDIY "Batafsil ma'lumot olish" (store_) havolasi orqali
+                # emas, ANIQ ro'yxatdan o'tish niyati bilan kirganini bildiradi,
+                # shunda shaxsiy chatda AI oddiy savol-javobni qaytadan boshlamay,
+                # darhol ism+telefon so'rashga o'tadi (pastga, CustomerSession.entry_mode'ga qarang).
+                is_register_entry = param.startswith("register_")
                 target_key = param
-                for prefix in ("admin_", "store_"):
+                for prefix in ("admin_", "store_", "register_"):
                     if param.startswith(prefix):
                         target_key = param[len(prefix):]
                         break
@@ -289,10 +297,41 @@ class TelegramWebhookView(View):
                     pass
 
                 if target_store:
+                    # ⚠️ "Qaysi biznes bilan gaplashyapman?" belgisi
+                    # (CustomerSession.active_store) — BIR ODAM uchun
+                    # GLOBAL, bot token'dan MUSTAQIL (shaxsiy bot bo'lsa
+                    # ham). Agar shu odam avval BOSHQA (haqiqiy, boshqa)
+                    # biznesning havolasini bosgan bo'lsa-yu, endi shu
+                    # havolani bossa — belgisi almashadi. Agar u keyin
+                    # avvalgi biznesga QAYTIB, havolani QAYTA bosmasdan
+                    # oddiy xabar yozsa, xabari ENDI yangi (noto'g'ri)
+                    # biznesga yo'naltirilib qolishi mumkin edi (jonli
+                    # muhokamada aniqlandi). Shu sabab, agar bu HAQIQIY
+                    # almashish bo'lsa (avval boshqa biznes bo'lgan),
+                    # mijozga qisqa eslatma yuboramiz — shunda u tasodifan
+                    # noto'g'ri biznesga yozib qolsa, buni darhol sezadi.
+                    previous_session = CustomerSession.objects.filter(platform_user_id=sender_id).first()
+                    is_store_switch = bool(
+                        previous_session and previous_session.active_store_id
+                        and previous_session.active_store_id != target_store.id
+                    )
+
                     CustomerSession.objects.update_or_create(
                         platform_user_id=sender_id,
-                        defaults={"active_store": target_store}
+                        defaults={
+                            "active_store": target_store,
+                            "entry_mode": CustomerSession.EntryMode.REGISTER if is_register_entry else "",
+                        }
                     )
+
+                    if is_store_switch and bot_token:
+                        from apps.chat.senders import send_telegram_message
+                        send_telegram_message(
+                            bot_token=bot_token,
+                            chat_id=message.chat_id,
+                            text=f"📍 Endi siz <b>{target_store.name}</b> bilan gaplashyapsiz.",
+                        )
+
                     return target_store
 
         # 1.5. ⚠️ BUG FIX: do'kon egasi, PARAMETRSIZ oddiy "/start" yoki
@@ -674,7 +713,7 @@ class TelegramWebhookView(View):
             param = parts[1].strip()
 
             target_key = param
-            for prefix in ("admin_", "store_"):
+            for prefix in ("admin_", "store_", "register_"):
                 if param.startswith(prefix):
                     target_key = param[len(prefix):]
                     break

@@ -5,7 +5,21 @@ B2B SaaS — Multi-tenant arxitektura
 
 from pathlib import Path
 import os
+import sys
 from django.core.exceptions import ImproperlyConfigured
+
+# ⚠️ `manage.py test` ishga tushganda True. Test muhiti PRODUKSIYA bilan
+# BIR XIL Redis/DB'ga ulanadi (alohida test-cache/test-secrets sozlanmagan),
+# shuning uchun testlar HAQIQIY tashqi tokenlarni (Telegram va h.k.) tasodifan
+# meros qilib olib, HAQIQIY odamlarga xabar yuborib yuborishi mumkin edi
+# (jonli holatda aniqlandi: `notify_store_owner`ning zaxira-yo'li test
+# ma'lumotlari uchun HAQIQIY platforma egasiga Telegram xabarlari yubordi).
+# Pastda shu sabab `TELEGRAM_BOT_TOKEN`/`SUPERADMIN_TG_CHAT_IDS` kabi
+# xavfli-tashqi-ta'sirli sozlamalar test rejimida SOXTA qiymatlarga
+# almashtiriladi — aniq bir test o'ziga kerakli qiymatni sinash uchun
+# `@override_settings(...)` bilan har doim ustidan yoza oladi (bu
+# ALLAQACHON butun loyihada shunday ishlatiladi).
+IS_TEST_RUN = len(sys.argv) > 1 and sys.argv[1] == "test"
 try:
     from dotenv import load_dotenv
     load_dotenv(override=False)  # Docker env vars (DB_HOST=db) ustidan yozmaslik uchun
@@ -69,6 +83,7 @@ INSTALLED_APPS = [
     "apps.orders",
     "apps.webhooks",
     "apps.notifications",
+    "apps.audit",
 ]
 
 
@@ -199,6 +214,11 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 60 * 15,  # Har 15 daqiqada bir marta
         "options": {"queue": "maintenance"},
     },
+    "check-all-bot-health": {
+        "task": "apps.stores.tasks.check_all_bot_health",
+        "schedule": 60 * 20,  # Har 20 daqiqada bir marta
+        "options": {"queue": "maintenance"},
+    },
 }
 
 
@@ -310,6 +330,14 @@ TELEGRAM_WEBHOOK_SECRET = env("TELEGRAM_WEBHOOK_SECRET", default="")
 SUPERADMIN_TG_CHAT_IDS = [
     cid.strip() for cid in env("SUPERADMIN_TG_CHAT_IDS", default="").split(",") if cid.strip()
 ]
+
+if IS_TEST_RUN:
+    # Haqiqiy .env qiymatlarini testlarga umuman ko'rsatmaymiz — shunda
+    # mock qilinmagan (unutilgan) har qanday kelajakdagi Telegram
+    # so'rovi ham HAQIQIY odamga emas, Telegramning o'zi rad etadigan
+    # soxta tokenga boradi.
+    TELEGRAM_BOT_TOKEN = "test-fake-master-token"
+    SUPERADMIN_TG_CHAT_IDS = []
 
 # Public URL (ngrok / cloudflare tunnel / production domain)
 PUBLIC_URL = env("PUBLIC_URL", default="").rstrip("/")

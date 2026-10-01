@@ -19,6 +19,28 @@ from django.utils import timezone
 
 logger = logging.getLogger("apps.chat")
 
+
+def _log_crm_sync_failure(provider: str, store, lead, error: str) -> None:
+    from apps.audit.services import log_platform_error
+    from apps.audit.models import PlatformError
+    log_platform_error(
+        source=PlatformError.Source.CRM_SYNC,
+        message=f"{provider}'ga lid yuborilmadi ({lead.lead_number}): {error}",
+        store=store,
+        metadata={"provider": provider, "lead_number": lead.lead_number},
+    )
+
+
+def _log_owner_notification_failure(store, lead, error: str) -> None:
+    from apps.audit.services import log_platform_error
+    from apps.audit.models import PlatformError
+    log_platform_error(
+        source=PlatformError.Source.OWNER_NOTIFICATION,
+        message=f"Egaga lid haqida xabar yuborilmadi ({lead.lead_number}): {error}",
+        store=store,
+        metadata={"lead_number": lead.lead_number},
+    )
+
 # ⚠️ BUG FIX: AI bitta suhbat davomida lid JSON blokini ketma-ket bir
 # necha xabarda qaytarib yuborishi mumkin (masalan mijoz ketma-ket ikkita
 # qisqa xabar yozsa, AI ikkalasida ham "ro'yxatdan o'tkazaman" deb hisoblab,
@@ -244,10 +266,18 @@ def notify_store_owner(store, lead) -> bool:
             return False
 
         if not store.tg_owner_chat_id:
+            # ⚠️ Ega TWA'dan bog'lanmagan bo'lsa (masalan Super Admin
+            # "Kirishni bekor qilish" bosgandan keyin, yangi ega hali
+            # bog'lanmagan) — lid baribir bazaga saqlanadi, lekin hech
+            # kimga DARHOL xabar bormasdi, ya'ni platforma egasi buni
+            # o'zi TWA'ni tekshirmaguncha bilmasdi. Endi shu holatda
+            # zaxira sifatida platforma superadminlariga (master bot
+            # orqali) ogohlantirish yuboriladi.
             logger.warning(
-                f"Egaga xabarnoma: {store.name} do'konida tg_owner_chat_id yo'q!"
+                f"Egaga xabarnoma: {store.name} do'konida tg_owner_chat_id yo'q! "
+                f"Platforma superadminlariga zaxira xabar yuborilmoqda."
             )
-            return False
+            return _notify_platform_superadmins_fallback(store, lead)
 
         success = send_telegram_lead_notification(
             bot_token=store.tg_bot_token,
@@ -269,6 +299,7 @@ def notify_store_owner(store, lead) -> bool:
             logger.warning(
                 f"Egaga xabarnoma yuborilmadi: {lead.lead_number}"
             )
+            _log_owner_notification_failure(store, lead, "noma'lum xato")
 
         return success
 
@@ -277,7 +308,50 @@ def notify_store_owner(store, lead) -> bool:
             f"Egaga xabarnoma yuborishda xato: {e}",
             exc_info=True,
         )
+        _log_owner_notification_failure(store, lead, str(e))
         return False
+
+
+def _notify_platform_superadmins_fallback(store, lead) -> bool:
+    """
+    `store.tg_owner_chat_id` bo'sh bo'lganda (TWA egasi bog'lanmagan)
+    chaqiriladigan zaxira yo'l — yangi lid haqidagi xabar MASTER bot
+    orqali `settings.SUPERADMIN_TG_CHAT_IDS` ro'yxatidagi har bir
+    platforma administratoriga yuboriladi, shunda lid "hech kim
+    bilmasdan" qolib ketmaydi.
+
+    ⚠️ ATAYLAB `Lead.owner_notified`ni `True`ga o'rnatmaydi — bu maydon
+    "HAQIQIY do'kon egasi xabardor qilindi" degan ma'noni bildiradi;
+    zaxira xabar administratorga bo'lgani uchun, yangi ega keyinchalik
+    bog'langanda ham bu HALI xabardor qilinmagan hisoblanadi.
+    """
+    from django.conf import settings
+
+    from apps.chat.senders import send_telegram_message, _format_lead_notification
+
+    master_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+    superadmin_ids = getattr(settings, "SUPERADMIN_TG_CHAT_IDS", [])
+    if not master_token or not superadmin_ids:
+        logger.warning(
+            f"Egaga xabarnoma: zaxira ham yuborilmadi — MASTER token yoki "
+            f"SUPERADMIN_TG_CHAT_IDS sozlanmagan ({store.name})."
+        )
+        return False
+
+    text = (
+        f"⚠️ <b>Diqqat: TWA egasi bog'lanmagan!</b>\n"
+        f"🏬 <b>Biznes:</b> {store.name}\n\n"
+        f"{_format_lead_notification(lead)}"
+    )
+
+    any_success = False
+    for chat_id in superadmin_ids:
+        if send_telegram_message(bot_token=master_token, chat_id=chat_id, text=text, parse_mode="HTML"):
+            any_success = True
+
+    if any_success:
+        logger.info(f"Egaga xabarnoma: zaxira xabar platforma superadminlariga yuborildi ({store.name}).")
+    return any_success
 
 
 def sync_lead_to_bitrix24(store, lead) -> bool:
@@ -314,6 +388,7 @@ def sync_lead_to_bitrix24(store, lead) -> bool:
             logger.info(f"Bitrix24'ga yuborildi: {lead.lead_number}")
         else:
             logger.warning(f"Bitrix24'ga yuborilmadi: {lead.lead_number}")
+            _log_crm_sync_failure("Bitrix24", store, lead, "noma'lum xato")
 
         return success
 
@@ -322,6 +397,7 @@ def sync_lead_to_bitrix24(store, lead) -> bool:
             f"Bitrix24'ga yuborishda xato: {e}",
             exc_info=True,
         )
+        _log_crm_sync_failure("Bitrix24", store, lead, str(e))
         return False
 
 
@@ -354,6 +430,7 @@ def sync_lead_to_google_sheets(store, lead) -> bool:
             logger.info(f"Google Sheets'ga yuborildi: {lead.lead_number}")
         else:
             logger.warning(f"Google Sheets'ga yuborilmadi: {lead.lead_number}")
+            _log_crm_sync_failure("Google Sheets", store, lead, "noma'lum xato")
 
         return success
 
@@ -362,4 +439,5 @@ def sync_lead_to_google_sheets(store, lead) -> bool:
             f"Google Sheets'ga yuborishda xato: {e}",
             exc_info=True,
         )
+        _log_crm_sync_failure("Google Sheets", store, lead, str(e))
         return False

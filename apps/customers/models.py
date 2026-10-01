@@ -237,6 +237,36 @@ class CustomerSession(BaseModel):
         help_text="Hozirgi muloqot qilayotgan do'koni"
     )
 
+    class EntryMode(models.TextChoices):
+        REGISTER = "register", "Ro'yxatdan o'tish (tez yo'l)"
+
+    # ⚠️ Guruhda "juda issiq" mijozga ko'rsatilgan "Ro'yxatdan o'tish"
+    # havolasi (/start register_<uuid>) orqali kirganini belgilaydi —
+    # shaxsiy chatda AI oddiy savol-javobni qaytadan boshlamay, darhol
+    # ism+telefon so'rashga o'tishi uchun (apps/chat/ai_service.py).
+    # Birinchi AI javobidan so'ng tozalanadi (bir martalik signal).
+    entry_mode = models.CharField(
+        max_length=20,
+        choices=EntryMode.choices,
+        blank=True,
+        default="",
+        help_text="Oxirgi deep-link qaysi maxsus kirish rejimini bildirgani (bo'sh — oddiy kirish)",
+    )
+
+    # ⚠️ Lid manbasini aniq kuzatish uchun (qaysi GURUH va qaysi MAVZU
+    # bo'yicha "Ro'yxatdan o'tish" havolasi ko'rsatilgan) — mijoz hali
+    # /start bosmasdan, guruhdagi AI javobi shu havolani yuborgan ZAHOTI
+    # o'rnatiladi (apps/webhooks/tasks.py), keyinroq Lead yaratilganda
+    # uning "notes" maydoniga qo'shiladi va shu yerdan tozalanadi.
+    source_group_chat_id = models.CharField(
+        max_length=50, blank=True, default="",
+        help_text="Qaysi Telegram guruhidan 'Ro'yxatdan o'tish' havolasi bosilgani",
+    )
+    source_context = models.CharField(
+        max_length=255, blank=True, default="",
+        help_text="Guruhda qaysi mavzu/kurs haqida gap ketgani (qisqa, lid notes'iga qo'shish uchun)",
+    )
+
     class Meta:
         verbose_name = "Mijoz Sessiyasi"
         verbose_name_plural = "Mijoz Sessiyalari"

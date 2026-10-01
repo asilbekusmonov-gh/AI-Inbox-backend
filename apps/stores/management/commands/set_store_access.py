@@ -16,6 +16,7 @@ python manage.py set_store_access --store "Najot Ta'lim" --active true
 from django.core.management.base import BaseCommand
 
 from apps.stores.models import Store
+from apps.stores.services import set_store_active
 
 
 class Command(BaseCommand):
@@ -62,13 +63,11 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"❌ Do'kon topilmadi: '{store_query}'"))
             return
 
-        if store.is_active == new_active:
+        result = set_store_active(store, new_active)
+        if not result["changed"]:
             state = "aktiv" if new_active else "to'xtatilgan"
             self.stdout.write(self.style.WARNING(f"⚠️ '{store.name}' allaqachon {state} holatda."))
             return
-
-        store.is_active = new_active
-        store.save(update_fields=["is_active", "updated_at"])
 
         self.stdout.write("")
         if new_active:

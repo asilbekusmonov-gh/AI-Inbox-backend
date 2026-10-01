@@ -92,4 +92,52 @@ def refresh_expiring_instagram_tokens(self):
         f"✓ {refreshed} yangilandi | ✗ {failed} xato"
     )
 
+
+@shared_task(
+    name="apps.stores.tasks.check_all_bot_health",
+    bind=True,
+    max_retries=1,
+    acks_late=True,
+    ignore_result=False,
+)
+def check_all_bot_health(self):
+    """
+    Shaxsiy bot ulagan, aktiv do'konlarning webhook sog'ligini davriy
+    ravishda (Celery Beat, har 20 daqiqada) tekshiradi — Super Admin
+    panelidagi "Bot xatosi" filtri va sog'liq ko'rsatkichi shu natijaga
+    tayanadi.
+
+    ⚠️ Umumiy (master) bot ishlatuvchi do'konlar ATAYLAB O'TKAZIB
+    YUBORILADI — ularning tokeni BIR XIL, shuning uchun bitta marta
+    (SuperAdminStatsView'da) tekshirish yetarli; har bir do'kon uchun
+    alohida tekshirish ortiqcha Telegram so'rovi va noto'g'ri (har bir
+    do'kon "o'zining" xatosi kabi ko'rsatiladigan) natija berardi.
+    """
+    from django.conf import settings
+    from apps.stores.models import Store
+    from apps.stores.services import check_store_bot_health
+
+    master_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+
+    stores_to_check = Store.objects.filter(
+        is_active=True, is_deleted=False,
+    ).exclude(tg_bot_token__isnull=True).exclude(tg_bot_token="")
+
+    checked = 0
+    unhealthy = 0
+    for store in stores_to_check:
+        if master_token and store.tg_bot_token == master_token:
+            continue
+        try:
+            result = check_store_bot_health(store)
+            checked += 1
+            if not result["healthy"]:
+                unhealthy += 1
+                logger.warning(f"[Bot Health Task] ✗ {store.name} — {result['error']}")
+        except Exception as e:
+            logger.error(f"[Bot Health Task] Kutilmagan xato: store={store.name} | {e}", exc_info=True)
+
+    logger.info(f"[Bot Health Task] Yakunlandi: {checked} ta tekshirildi | {unhealthy} ta xato")
+    return {"checked": checked, "unhealthy": unhealthy}
+
     return {"refreshed": refreshed, "failed": failed, "total": total}

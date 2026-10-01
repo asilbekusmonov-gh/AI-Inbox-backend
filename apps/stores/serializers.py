@@ -39,6 +39,10 @@ class StoreSerializer(serializers.ModelSerializer):
             "ai_model",
             "ai_temperature",
             "ai_max_tokens",
+            "communication_tone",
+            "working_hours",
+            "branches",
+            "faq_items",
             "subscription_plan",
             "monthly_message_limit",
             "is_active",
@@ -80,11 +84,75 @@ class StoreSerializer(serializers.ModelSerializer):
         return obj.has_own_bot
 
 
+# ── Biznes ma'lumotlari (Filiallar/FAQ/Ish vaqti) — strukturaviy
+# JSON validatsiyasi, xuddi `validate_item_metadata` kabi: xom,
+# tekshirilmagan JSON to'g'ridan-to'g'ri bazaga yozilmasligi uchun. ──
+
+WORKING_HOURS_DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+class BranchSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=255)
+    address = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+    phone = serializers.CharField(max_length=30, required=False, allow_blank=True, default="")
+
+
+class FAQItemSerializer(serializers.Serializer):
+    question = serializers.CharField(max_length=500)
+    answer = serializers.CharField(max_length=2000)
+
+
+class WorkingHoursDaySerializer(serializers.Serializer):
+    closed = serializers.BooleanField(default=False)
+    open = serializers.CharField(max_length=5, required=False, allow_blank=True, default="")
+    close = serializers.CharField(max_length=5, required=False, allow_blank=True, default="")
+
+
+def validate_branches(branches: list) -> list:
+    if len(branches) > 20:
+        raise serializers.ValidationError("Ko'pi bilan 20 ta filial qo'shish mumkin.")
+    serializer = BranchSerializer(data=branches, many=True)
+    serializer.is_valid(raise_exception=True)
+    return serializer.validated_data
+
+
+def validate_faq_items(items: list) -> list:
+    if len(items) > 50:
+        raise serializers.ValidationError("Ko'pi bilan 50 ta savol-javob qo'shish mumkin.")
+    serializer = FAQItemSerializer(data=items, many=True)
+    serializer.is_valid(raise_exception=True)
+    return serializer.validated_data
+
+
+def validate_working_hours(working_hours: dict) -> dict:
+    unknown_keys = set(working_hours.keys()) - set(WORKING_HOURS_DAY_KEYS)
+    if unknown_keys:
+        raise serializers.ValidationError(f"Noma'lum kun kaliti: {', '.join(unknown_keys)}")
+    validated = {}
+    for day in WORKING_HOURS_DAY_KEYS:
+        if day not in working_hours:
+            continue
+        serializer = WorkingHoursDaySerializer(data=working_hours[day])
+        serializer.is_valid(raise_exception=True)
+        validated[day] = serializer.validated_data
+    return validated
+
+
 class StoreConfigUpdateSerializer(serializers.ModelSerializer):
     """
     AI Prompt, Bot sozlamalari va do'kon ma'lumotlarini yangilash serializeri.
     Frontend SettingsView'dan PATCH /api/v1/store/ keladi.
     """
+
+    def validate_branches(self, value):
+        return validate_branches(value)
+
+    def validate_faq_items(self, value):
+        return validate_faq_items(value)
+
+    def validate_working_hours(self, value):
+        return validate_working_hours(value)
+
     class Meta:
         model = Store
         # ⚠️ XAVFSIZLIK TUZATISHI: "tg_bot_token" va "tg_owner_chat_id"
@@ -108,6 +176,10 @@ class StoreConfigUpdateSerializer(serializers.ModelSerializer):
             "ai_system_prompt",
             "ai_model",
             "ai_temperature",
+            "communication_tone",
+            "working_hours",
+            "branches",
+            "faq_items",
             "group_spam_cleanup_enabled",
             "ig_page_id",
             "ig_access_token",
@@ -280,13 +352,15 @@ class SuperAdminBusinessListSerializer(serializers.ModelSerializer):
     total_leads = serializers.IntegerField(read_only=True)  # .annotate() orqali queryset'ga qo'shiladi
     admin_link = serializers.SerializerMethodField()
     customer_link = serializers.SerializerMethodField()
+    own_bot_connected = serializers.BooleanField(source="has_own_bot", read_only=True)
 
     class Meta:
         model = Store
         fields = [
             "id", "name", "category_type", "subscription_plan",
             "is_active", "ai_active", "tg_owner_chat_id", "total_leads", "created_at",
-            "admin_link", "customer_link",
+            "admin_link", "customer_link", "own_bot_connected",
+            "bot_health_ok", "bot_health_checked_at", "subscription_ends_at",
         ]
 
     # ⚠️ Yaratilish paytida ko'rsatilgan havolalar bir martalik "Biznes
@@ -312,4 +386,133 @@ class SuperAdminBusinessCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255)
     category_type = serializers.ChoiceField(choices=Store.CategoryType.choices)
     bot_username = serializers.CharField(max_length=64, required=False, default="LeadNodeBot")
+    # Ixtiyoriy — biznes egasi boshidanoq o'z shaxsiy bot tokenini bergan
+    # bo'lsa, shu yerga kiritiladi va darhol ulanadi (`provision_store`).
+    bot_token = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class SuperAdminBusinessDetailSerializer(serializers.ModelSerializer):
+    """Super Admin — bitta biznesning to'liq operatsion holati (Biznes tafsilotlari sahifasi)."""
+    admin_link = serializers.SerializerMethodField()
+    customer_link = serializers.SerializerMethodField()
+    twa_access = serializers.SerializerMethodField()
+    token_status = serializers.SerializerMethodField()
+    operational_summary = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Store
+        fields = [
+            "id", "name", "description", "phone_number", "platform", "category_type",
+            "is_active", "subscription_plan", "monthly_message_limit", "subscription_ends_at", "created_at",
+            "admin_link", "customer_link", "twa_access", "token_status", "operational_summary",
+        ]
+
+    def get_admin_link(self, obj):
+        if not obj.tg_bot_username:
+            return None
+        return f"https://t.me/{obj.tg_bot_username}?start=admin_{obj.id}"
+
+    def get_customer_link(self, obj):
+        if not obj.tg_bot_username:
+            return None
+        return f"https://t.me/{obj.tg_bot_username}?start=store_{obj.id}"
+
+    def get_twa_access(self, obj):
+        # Xom `tg_owner_chat_id` frontendga ATAYLAB yuborilmaydi (ichki
+        # texnik identifikator) — faqat bog'langan/bog'lanmaganligi va
+        # oxirgi 4 raqami (tasdiqlash uchun, to'liq ID'ni ochmagan holda).
+        chat_id = obj.tg_owner_chat_id
+
+        # ⚠️ Biriktirilgan ega Telegram'da @username o'rnatgan bo'lsa
+        # (majburiy emas), shuni Super Admin ko'rishi va to'g'ridan-to'g'ri
+        # o'sha odam bilan Telegram'da bog'lanishi uchun — YANGI maydon
+        # qo'shish shart emas: ega bot bilan yozganda `Customer` yozuvi
+        # ALLAQACHON shu username'ni saqlagan bo'ladi
+        # (`apps/webhooks/tasks.py::process_incoming_message`).
+        telegram_username = None
+        if chat_id:
+            from apps.customers.models import Customer
+
+            owner_customer = Customer.objects.filter(
+                store=obj, platform_user_id=chat_id,
+            ).exclude(username="").exclude(username__isnull=True).first()
+            if owner_customer:
+                telegram_username = owner_customer.username
+
+        return {
+            "bound": bool(chat_id),
+            "masked_chat_id": f"••••{chat_id[-4:]}" if chat_id else None,
+            "telegram_username": telegram_username,
+            "telegram_link": f"https://t.me/{telegram_username}" if telegram_username else None,
+        }
+
+    def get_token_status(self, obj):
+        from django.conf import settings
+        return {
+            "connected": obj.has_own_bot,
+            "is_master_bot": bool(obj.tg_bot_token) and obj.tg_bot_token == getattr(settings, "TELEGRAM_BOT_TOKEN", ""),
+            "bot_username": obj.tg_bot_username or None,
+            "masked_hash": f"••••{obj.tg_bot_token_hash[-4:]}" if obj.tg_bot_token_hash else None,
+            # ⚠️ Faqat shaxsiy botlar uchun ma'noga ega (apps/stores/tasks.py
+            # check_all_bot_health umumiy botni o'tkazib yuboradi) — umumiy
+            # bot uchun doim None (hali tekshirilmagan) qaytadi.
+            "health_ok": obj.bot_health_ok,
+            "health_checked_at": obj.bot_health_checked_at,
+            "health_error": obj.bot_health_error or None,
+        }
+
+    def get_operational_summary(self, obj):
+        # ⚠️ ATAYLAB `apps/orders/views.py::LeadViewSet.stats`dagi bilan
+        # bir xil so'rov naqshi (query pattern) — lekin hozircha alohida.
+        # Bu tez-tez ishlaydigan, jonli mijozlar hozir ishlatayotgan
+        # endpointni (Phase 1'da) tegmasdan qoldirish uchun ataylab
+        # qilingan vaqtinchalik xolislik. Statistika sahifasi (Phase 3)
+        # qurilganda ikkisi BIR umumiy `apps/orders/services.py`
+        # funksiyasiga birlashtiriladi.
+        from apps.customers.models import Customer
+        from apps.chat.models import ChatMessage
+        from apps.orders.models import Lead
+
+        customers_qs = Customer.objects.filter(store=obj, is_deleted=False)
+        if obj.tg_owner_chat_id:
+            customers_qs = customers_qs.exclude(platform_user_id=obj.tg_owner_chat_id)
+
+        interactions_total = customers_qs.count()
+        conversed_total = customers_qs.filter(
+            messages__role=ChatMessage.Role.ASSISTANT,
+            messages__message_id__startswith="ai_resp_",
+        ).distinct().count()
+        leads_total = Lead.objects.filter(store=obj, is_deleted=False).count()
+        conversion_rate = round((leads_total / interactions_total) * 100, 1) if interactions_total else 0.0
+
+        return {
+            "interactions_total": interactions_total,
+            "conversed_total": conversed_total,
+            "leads_total": leads_total,
+            "conversion_rate": conversion_rate,
+        }
+
+
+class SuperAdminSubscriptionPlanUpdateSerializer(serializers.Serializer):
+    """Super Admin — biznesning obuna rejasini va/yoki tugash sanasini o'zgartirish uchun kiruvchi ma'lumotlar."""
+    subscription_plan = serializers.ChoiceField(choices=Store.SubscriptionPlan.choices, required=False)
+    monthly_message_limit = serializers.IntegerField(required=False, min_value=1)
+    subscription_ends_at = serializers.DateTimeField(required=False, allow_null=True)
+
+
+class SuperAdminTokenConnectSerializer(serializers.Serializer):
+    """Super Admin — biznesga shaxsiy Telegram bot tokenini ulash uchun kiruvchi ma'lumot."""
+    bot_token = serializers.CharField()
+
+
+class SuperAdminDeleteReauthSerializer(serializers.Serializer):
+    """
+    Super Admin — biznesni BUTUNLAY o'chirish uchun qayta tasdiqlash
+    ma'lumotlari. ⚠️ Bu HOZIRGI (Telegram orqali kirgan bo'lishi mumkin
+    bo'lgan) sessiyadan MUSTAQIL — parolga ega istalgan platforma xodimi
+    hisobi bilan tasdiqlash mumkin (Telegram orqali kirganlarda parol
+    umuman yo'q — unusable password).
+    """
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
 
