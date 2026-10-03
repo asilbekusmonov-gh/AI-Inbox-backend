@@ -29,6 +29,11 @@ _ANALYZE_FILE_ALLOWED_MIME_TYPES = {
     "image/png",
     "image/webp",
     "text/plain",
+    # ⚠️ .md fayl brauzerda odatda "text/markdown" MIME turi bilan yuklanadi
+    # (ba'zida umuman aniqlanmay bo'sh qoladi) — avval bu whitelistda yo'q
+    # edi, shuning uchun oddiy matn fayli (mazmunan "text/plain"dan farqi
+    # yo'q) ham rad etilardi. Jonli holatda aniqlandi.
+    "text/markdown",
 }
 _ANALYZE_FILE_MAX_SIZE = 10 * 1024 * 1024
 
@@ -132,7 +137,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         mime_type = uploaded_file.content_type or ""
         if mime_type not in _ANALYZE_FILE_ALLOWED_MIME_TYPES:
             return Response(
-                {"error": "Fayl turi qo'llab-quvvatlanmaydi. PDF, JPG/PNG/WEBP rasm yoki TXT fayl yuklang."},
+                {"error": f"Fayl turi qo'llab-quvvatlanmaydi ({mime_type or 'nomaʼlum'}). PDF, JPG/PNG/WEBP rasm yoki TXT/MD matn fayl yuklang."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if uploaded_file.size > _ANALYZE_FILE_MAX_SIZE:
@@ -170,6 +175,14 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         return Response(
             {
+                # ⚠️ Egasi "Nomi"/"Narxi"ni bo'sh qoldirgan bo'lsa ham
+                # (endi majburiy emas) formani to'ldirish uchun — AI
+                # fayldan aniqlagan nomi/narxi shu yerda qaytariladi,
+                # frontend buni ham xuddi boshqa maydonlar kabi
+                # "o'zim yozganim bo'lmasa, AI topganini olaman" tartibida
+                # qo'llaydi.
+                "name": str(result.get("name") or "").strip(),
+                "price": result.get("price") or 0,
                 "description": str(result.get("description") or "").strip(),
                 "category": str(result.get("category") or "").strip(),
                 "stock": result.get("stock") or 0,

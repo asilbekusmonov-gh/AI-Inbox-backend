@@ -77,3 +77,38 @@ class AnalyzeProductFileTestCase(APITestCase):
         self.client.force_authenticate(user=self.owner)
         response = self._upload()
         self.assertEqual(response.status_code, 502)
+
+    @patch("apps.products.ai_service.analyze_product_file")
+    def test_markdown_file_is_accepted(self, mock_analyze):
+        # ⚠️ Jonli holatda .md fayl "text/markdown" MIME turi bilan
+        # yuklangani uchun avval rad etilgan edi — endi whitelistga
+        # qo'shilgan, text/plain bilan bir xil ishlov beriladi.
+        mock_analyze.return_value = {"description": "Tavsif", "category": "", "stock": 0, "duration": "", "location": "", "custom_fields": []}
+        self.client.force_authenticate(user=self.owner)
+        response = self._upload(
+            file=SimpleUploadedFile("kurs.md", b"# IELTS kursi\nNarxi 900000 som", content_type="text/markdown"),
+        )
+        self.assertEqual(response.status_code, 200)
+        mock_analyze.assert_called_once()
+        self.assertEqual(mock_analyze.call_args.kwargs["mime_type"], "text/markdown")
+
+    @patch("apps.products.ai_service.analyze_product_file")
+    def test_name_and_price_not_required_and_returned_from_ai(self, mock_analyze):
+        # ⚠️ Nomi/narxi endi "Fayl orqali" rejimida majburiy emas — AI
+        # fayldan topgan nomi/narxi javobda qaytariladi, frontend buni
+        # bo'sh maydonlarni to'ldirish uchun ishlatadi.
+        mock_analyze.return_value = {
+            "name": "IELTS tayyorlov kursi",
+            "price": 900000,
+            "description": "Tavsif", "category": "", "stock": 0, "duration": "", "location": "", "custom_fields": [],
+        }
+        self.client.force_authenticate(user=self.owner)
+        response = self._upload()  # name/price berilmagan
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["name"], "IELTS tayyorlov kursi")
+        self.assertEqual(data["price"], 900000)
+        call_kwargs = mock_analyze.call_args.kwargs
+        self.assertEqual(call_kwargs["name"], "")
+        self.assertIsNone(call_kwargs["price"])

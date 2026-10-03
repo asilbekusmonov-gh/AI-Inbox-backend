@@ -194,8 +194,8 @@ def analyze_product_file(
     custom_fields) bilan mos keladi.
 
     Returns:
-        dict — {"description", "category", "stock", "duration", "location",
-        "custom_fields": [{"key", "value"}, ...]}
+        dict — {"name", "price", "description", "category", "stock",
+        "duration", "location", "custom_fields": [{"key", "value"}, ...]}
 
     Raises:
         ValueError: Gemini bo'sh yoki JSON bo'lmagan javob qaytarsa
@@ -213,18 +213,28 @@ def analyze_product_file(
         context_lines.append(f"Nomi: {name}")
     if price:
         context_lines.append(f"Narxi: {price} so'm")
-    context = ("\n\nMa'lum bo'lgan ma'lumot:\n" + "\n".join(context_lines)) if context_lines else ""
+    context = ("\n\nMa'lum bo'lgan ma'lumot (bu allaqachon berilgan, qayta ajratib olish shart emas):\n" + "\n".join(context_lines)) if context_lines else ""
 
+    # ⚠️ Avval "Nomi"/"Narxi" frontendda majburiy maydon edi, shuning uchun
+    # bu yerga har doim berilgan bo'lardi. Endi ular ixtiyoriy bo'lgani
+    # uchun (egasi faylga ishonib, bo'sh qoldirishi mumkin) AI shularni ham
+    # fayldan ajratib olishga harakat qiladi — agar `name`/`price` yuqorida
+    # berilgan bo'lsa, bu ikki maydonni e'tiborsiz qoldirsa ham bo'ladi
+    # (chaqiruvchi — view — baribir o'zi berganini ustun qo'yadi).
     prompt = (
         f"Biriktirilgan fayl — {label} haqida egasi yuklagan hujjat/rasm "
         f"(masalan reklama posti, broshura, dars jadvali yoki skrinshot). "
         f"Uning tarkibidagi ma'lumotlarni o'qib, quyidagi JSON formatda "
         f"strukturaviy ma'lumot chiqar:\n\n"
-        '{"description": "...", "category": "...", "stock": 0, '
+        '{"name": "...", "price": 0, "description": "...", "category": "...", "stock": 0, '
         '"duration": "...", "location": "...", '
         '"custom_fields": [{"key": "...", "value": "..."}]}\n\n'
         "Qoidalar:\n"
         "- FAQAT JSON obyekt qaytar — boshqa hech qanday matn, izoh yoki ```json belgisi qo'shma.\n"
+        "- \"name\" — agar yuqorida 'Ma'lum bo'lgan ma'lumot'da nomi berilmagan bo'lsa, faylda aniq ko'rsatilgan "
+        "kurs/xizmat nomini (sarlavha yoki eng aniq mavzu nomi) chiqar, aks holda bo'sh qator.\n"
+        "- \"price\" — agar yuqorida narxi berilmagan bo'lsa va faylda aniq narx (so'mda) ko'rsatilgan bo'lsa, "
+        "FAQAT sonni (valyuta belgisi/so'z qo'shmasdan) chiqar, aks holda 0.\n"
         "- \"description\" — AI sotuv boti mijozlarga ko'rsatadigan QISQA "
         "(bitta yoki ikkita gap, 40 so'zdan oshmasin), ishonarli va sotuvga undovchi tavsif.\n"
         "- \"category\" — faylda aniq mavzu/yo'nalish ko'rsatilgan bo'lsa shu (masalan \"Dasturlash\", \"Chet tillari\"), aks holda bo'sh qatr.\n"
@@ -253,7 +263,7 @@ def analyze_product_file(
         import io as _io
 
         contents = [Image.open(_io.BytesIO(file_bytes)), prompt]
-    elif mime_type == "text/plain":
+    elif mime_type in ("text/plain", "text/markdown"):
         try:
             file_text = file_bytes.decode("utf-8", errors="ignore")
         except Exception:

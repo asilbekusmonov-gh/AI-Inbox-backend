@@ -34,6 +34,20 @@ class Store(BaseModel):
         EDUCATION = "education", "Ta'lim (O'quv markazlari, kurslar)"
         SERVICES = "services", "Xizmat ko'rsatish (Go'zallik salonlari, klinikalar, va h.k.)"
 
+    class CTAType(models.TextChoices):
+        # ⚠️ Avval AI promptida "Bepul Sinov Darsi" HAR DOIM, barcha
+        # do'konlar uchun qattiq yozilgan edi — bu haqiqatda sinov darsi
+        # taklif qilmaydigan biznes uchun AI noto'g'ri ma'lumot
+        # tarqatishiga olib kelardi (real feedback asosida topildi). Endi
+        # har bir do'kon o'ziga mos taklif turini tanlaydi, AI faqat shu
+        # turni ishlatadi.
+        FREE_TRIAL = "free_trial", "Bepul sinov darsi"
+        CONSULTATION = "consultation", "Bepul konsultatsiya"
+        PLACEMENT_TEST = "placement_test", "Daraja aniqlash testi"
+        BOOKING = "booking", "Vaqt band qilish"
+        OPERATOR_CALL = "operator_call", "Operator qo'ng'irog'i"
+        NONE = "none", "Alohida taklif yo'q — faqat ro'yxatdan o'tish"
+
     # ── Asosiy ma'lumotlar ──────────────────────────────────────
     owner = models.OneToOneField(
         User,
@@ -67,6 +81,16 @@ class Store(BaseModel):
         choices=CategoryType.choices,
         default=CategoryType.EDUCATION,
         help_text="Biznes sohasi/kategoriyasi"
+    )
+    cta_type = models.CharField(
+        max_length=20,
+        choices=CTAType.choices,
+        default=CTAType.FREE_TRIAL,
+        help_text=(
+            "AI mijozga taklif qiladigan CTA (harakatga chaqiruv) turi — "
+            "default FREE_TRIAL mavjud do'konlarning hozirgi xatti-harakatini "
+            "saqlab qoladi, yangi do'konlar buni Sozlamalarda o'zgartirishi mumkin."
+        )
     )
 
     # ── Instagram sozlamalari ──────────────────────────────────
@@ -286,15 +310,17 @@ class Store(BaseModel):
         help_text="Sinov muddati yoki joriy obuna tugash sanasi (Super Admin qo'lda belgilaydi)"
     )
     monthly_message_limit = models.IntegerField(
-        # ⚠️ Avval 500 edi — jonli yuklama-testda eng katta simulyatsiya
-        # qilingan biznes (300 mijoz/oy) o'zi ~1000-1200 ta AI chaqiruvi
-        # yaratgani aniqlandi, ya'ni haqiqatan muvaffaqiyatli biznes shu
-        # "bepul sinov oyi" davomida o'rtada AI'siz qolib ketardi. Gemini
-        # narxi arzon bo'lgani uchun (taxminan $0.001-0.003/xabar) 5000ga
-        # oshirildi — bu eng og'ir simulyatsiyadan ham ~4x yuqori (real
-        # biznes sezmaydi), lekin hali ham chinakam nosozlik/suiiste'mol
-        # holatlarini ushlab qoladigan chekli qiymat (cheksiz emas).
-        default=5000,
+        # ⚠️ Avval 500, keyin 5000 edi — jonli yuklama-testda eng katta
+        # simulyatsiya qilingan biznes (300 mijoz/oy) ~1000-1200 ta AI
+        # chaqiruvi yaratgani aniqlangan edi. 5000 bu yukdan ~4x yuqori
+        # bo'lib, "bepul sinov oyi" davomidagi haqiqiy byudjet nazoratini
+        # deyarli bermasdi (bitta sinov-biznes eng yomon holatda $15-20
+        # gacha sarflashi mumkin edi). 2000ga tushirildi — bu hamon eng
+        # og'ir simulyatsiyadan (~1200) ~1.7x yuqori (real faol biznes
+        # sezmaydi), lekin eng yomon holatdagi xarajatni (~$8/oy) ancha
+        # kichik, bir nechta sinov-biznesni bir vaqtda bepul ulash uchun
+        # byudjetga mos chekli qiymatga tushiradi.
+        default=2000,
         help_text="Oylik maksimal xabar soni (tarif chegarasi)"
     )
     is_active = models.BooleanField(
@@ -322,6 +348,19 @@ class Store(BaseModel):
         # bu haqda o'ylashi shart emas).
         self.tg_bot_token_hash = sha256_hex(self.tg_bot_token) if self.tg_bot_token else None
         super().save(*args, **kwargs)
+
+    def soft_delete(self):
+        # ⚠️ BUG FIX: BaseModel.soft_delete() faqat is_deleted=True qilardi,
+        # tg_owner_chat_id/tg_group_chat_id esa unique=True bo'lgani uchun
+        # bazada "band" bo'lib qolardi — o'chirilgan do'konning sobiq egasi
+        # boshqa (yoki shu) do'konni qayta egallashga urinsa, unique
+        # ziddiyat (IntegrityError) tufayli "allaqachon boshqa do'konning
+        # egasisiz" degan noto'g'ri xato ko'rardi. Jonli holatda aniqlandi.
+        # Endi o'chirishda bu ikki noyob maydon ham bo'shatiladi.
+        self.tg_owner_chat_id = None
+        self.tg_group_chat_id = None
+        self.is_deleted = True
+        self.save(update_fields=["is_deleted", "tg_owner_chat_id", "tg_group_chat_id", "updated_at"])
 
     @property
     def has_instagram(self) -> bool:
