@@ -9,6 +9,33 @@ from django.db import models
 from django.db.models import Q
 from apps.core.models import BaseModel
 
+# ⚠️ Jonli holatda aniqlangan jiddiy xato: mijozlar ko'pincha Kirill
+# alifbosida yozadi ("нолдан"), lekin do'kon egalari katalogni deyarli
+# doim Lotin alifbosida to'ldiradi ("noldan"). `icontains` matn qidiruvi
+# ikki alifboni bir-biriga mos deb bilmaydi — natijada mijoz Kirillda
+# yozsa, haqiqiy mos kurs (masalan "Beginner" kursi) HECH QACHON
+# topilmaydi. Avval bu "ishlayotganga" o'xshardi, chunki mos kelmaganda
+# pastdagi FALLBACK ("hech narsa topilmasa — barcha aktiv mahsulotlarni
+# qaytar") ishga tushib, tasodifan barchasi ko'rsatilardi — lekin suhbat
+# tarixida biror LOTIN/umumiy so'z (masalan "IELTS") haqiqiy moslik
+# topsa, fallback ishga tushmay, FAQAT shu (noto'g'ri) natija qaytardi,
+# va AI haqiqatda mavjud "Beginner" kursini "mavjud emas" deb aytib
+# qo'ydi. Shuning uchun qidiruv so'zi Kirilldan Lotinga ham
+# transliteratsiya qilinib, ikkalasi bo'yicha ham qidiriladi.
+_UZ_CYRILLIC_TO_LATIN = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "yo",
+    "ж": "j", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+    "ф": "f", "х": "x", "ц": "s", "ч": "ch", "ш": "sh", "щ": "sh", "ъ": "'",
+    "ы": "i", "э": "e", "ю": "yu", "я": "ya", "ь": "",
+    "ғ": "g'", "қ": "q", "ў": "o'", "ҳ": "h",
+}
+
+
+def transliterate_uz_cyrillic_to_latin(text: str) -> str:
+    """O'zbek Kirill matnini (taxminiy, qidiruv uchun yetarli aniqlikda) Lotinga o'giradi."""
+    return "".join(_UZ_CYRILLIC_TO_LATIN.get(ch.lower(), ch) for ch in text)
+
 
 class Product(BaseModel):
     """
@@ -107,10 +134,17 @@ class Product(BaseModel):
         if not words:
             return base_qs[:limit]
 
-        # Name yoki description bo'yicha qidiruv
+        # Name yoki description bo'yicha qidiruv — har bir so'z UCHUN,
+        # Kirillcha bo'lsa Lotincha transliteratsiyasi bo'yicha HAM
+        # qidiriladi (katalog deyarli doim Lotinda to'ldirilgani uchun).
         q_objects = Q()
         for word in words:
             q_objects |= Q(name__icontains=word) | Q(description__icontains=word) | Q(category__icontains=word)
+            translit = transliterate_uz_cyrillic_to_latin(word)
+            if translit.lower() != word.lower():
+                q_objects |= (
+                    Q(name__icontains=translit) | Q(description__icontains=translit) | Q(category__icontains=translit)
+                )
 
         results = base_qs.filter(q_objects).distinct()[:limit]
 

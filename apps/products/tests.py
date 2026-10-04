@@ -9,8 +9,10 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase
 from rest_framework.test import APITestCase
 
+from apps.products.models import Product, transliterate_uz_cyrillic_to_latin
 from apps.stores.models import Store
 
 
@@ -112,3 +114,50 @@ class AnalyzeProductFileTestCase(APITestCase):
         call_kwargs = mock_analyze.call_args.kwargs
         self.assertEqual(call_kwargs["name"], "")
         self.assertIsNone(call_kwargs["price"])
+
+
+class CyrillicTransliterationTestCase(TestCase):
+    def test_basic_word_transliterated(self):
+        self.assertEqual(transliterate_uz_cyrillic_to_latin("нолдан"), "noldan")
+
+    def test_special_uzbek_letters(self):
+        self.assertEqual(transliterate_uz_cyrillic_to_latin("ғўқҳ"), "g'o'qh")
+
+    def test_latin_text_passes_through_unchanged(self):
+        self.assertEqual(transliterate_uz_cyrillic_to_latin("noldan"), "noldan")
+
+
+class SearchForAiCyrillicMatchTestCase(TestCase):
+    """
+    Jonli holatda aniqlangan xato: mijoz Kirillda ("нолдан") yozganda,
+    katalogda Lotin alifbosida ("noldan") yozilgan kurs TOPILMASLIGI
+    kerak emas edi — bu test aynan shu regressiyani ushlab qoladi.
+    """
+
+    def setUp(self):
+        owner = User.objects.create_user(username="cyr_search_owner", password="x")
+        self.store = Store.objects.create(owner=owner, name="Til Markazi", category_type="education")
+        self.beginner = Product.objects.create(
+            store=self.store, category_type="education",
+            name="English for Beginners", price=500000,
+            description="Ingliz tilini noldan mukammal o'rganib, erkin so'zlashish",
+        )
+        self.ielts = Product.objects.create(
+            store=self.store, category_type="education",
+            name="Professional IELTS Preparation", price=750000,
+            description="IELTS'dan 7.0+ ball olishni xohlaysizmi?",
+        )
+
+    def test_cyrillic_query_matches_latin_catalog_entry(self):
+        results = Product.search_for_ai(self.store, "менга нолдан керак", limit=5)
+        self.assertIn(self.beginner, results)
+
+    def test_cyrillic_query_does_not_lose_match_when_combined_with_other_history(self):
+        # Suhbat tarixida "IELTS" so'zi haqiqiy moslik topib, oldin
+        # fallback'ni (hamma narsani ko'rsatish) ishga tushirmay qo'yardi
+        # — shu sabab "Beginner" kursi butunlay yo'qolib qolardi.
+        combined = "менга нолдан керак IELTS курсди нархини айтиб бериб оласизми"
+        results = Product.search_for_ai(self.store, combined, limit=5)
+        names = [p.name for p in results]
+        self.assertIn(self.beginner.name, names)
+        self.assertIn(self.ielts.name, names)
