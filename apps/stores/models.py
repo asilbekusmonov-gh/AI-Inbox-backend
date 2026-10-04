@@ -34,20 +34,6 @@ class Store(BaseModel):
         EDUCATION = "education", "Ta'lim (O'quv markazlari, kurslar)"
         SERVICES = "services", "Xizmat ko'rsatish (Go'zallik salonlari, klinikalar, va h.k.)"
 
-    class CTAType(models.TextChoices):
-        # ⚠️ Avval AI promptida "Bepul Sinov Darsi" HAR DOIM, barcha
-        # do'konlar uchun qattiq yozilgan edi — bu haqiqatda sinov darsi
-        # taklif qilmaydigan biznes uchun AI noto'g'ri ma'lumot
-        # tarqatishiga olib kelardi (real feedback asosida topildi). Endi
-        # har bir do'kon o'ziga mos taklif turini tanlaydi, AI faqat shu
-        # turni ishlatadi.
-        FREE_TRIAL = "free_trial", "Bepul sinov darsi"
-        CONSULTATION = "consultation", "Bepul konsultatsiya"
-        PLACEMENT_TEST = "placement_test", "Daraja aniqlash testi"
-        BOOKING = "booking", "Vaqt band qilish"
-        OPERATOR_CALL = "operator_call", "Operator qo'ng'irog'i"
-        NONE = "none", "Alohida taklif yo'q — faqat ro'yxatdan o'tish"
-
     # ── Asosiy ma'lumotlar ──────────────────────────────────────
     owner = models.OneToOneField(
         User,
@@ -81,16 +67,6 @@ class Store(BaseModel):
         choices=CategoryType.choices,
         default=CategoryType.EDUCATION,
         help_text="Biznes sohasi/kategoriyasi"
-    )
-    cta_type = models.CharField(
-        max_length=20,
-        choices=CTAType.choices,
-        default=CTAType.FREE_TRIAL,
-        help_text=(
-            "AI mijozga taklif qiladigan CTA (harakatga chaqiruv) turi — "
-            "default FREE_TRIAL mavjud do'konlarning hozirgi xatti-harakatini "
-            "saqlab qoladi, yangi do'konlar buni Sozlamalarda o'zgartirishi mumkin."
-        )
     )
 
     # ── Instagram sozlamalari ──────────────────────────────────

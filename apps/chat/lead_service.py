@@ -163,11 +163,8 @@ def create_lead_from_ai_data(
         )
         interested_course = _find_interested_course(store, interest_name) if interest_name else None
 
-        preferred_time = str(lead_data.get("preferred_time", "")).strip()
         booking_time = str(lead_data.get("booking_time", "")).strip()
         specialist = str(lead_data.get("specialist", "")).strip()
-        if preferred_time:
-            notes = (notes + " | " if notes else "") + f"Sinov darsi vaqti: {preferred_time}"
         if booking_time:
             notes = (notes + " | " if notes else "") + f"Band qilingan vaqt: {booking_time}"
         if specialist:
