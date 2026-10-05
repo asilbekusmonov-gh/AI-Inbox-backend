@@ -239,12 +239,18 @@ class CustomerSession(BaseModel):
 
     class EntryMode(models.TextChoices):
         REGISTER = "register", "Ro'yxatdan o'tish (tez yo'l)"
+        INFO = "info", "Ma'lumot olish havolasi orqali kirish"
 
-    # ⚠️ Guruhda "juda issiq" mijozga ko'rsatilgan "Ro'yxatdan o'tish"
-    # havolasi (/start register_<uuid>) orqali kirganini belgilaydi —
-    # shaxsiy chatda AI oddiy savol-javobni qaytadan boshlamay, darhol
-    # ism+telefon so'rashga o'tishi uchun (apps/chat/ai_service.py).
-    # Birinchi AI javobidan so'ng tozalanadi (bir martalik signal).
+    # ⚠️ Guruhdan shaxsiy chatga QAYSI havola orqali kirganini belgilaydi —
+    # ikkalasi ham "shunchaki kuzatuvchi emas, aniq qiziqib kelgan mijoz"
+    # signali, lekin ikki xil shiddatda: REGISTER — "Ro'yxatdan o'tish"
+    # havolasi (/start register_<uuid>), ANIQ ro'yxatdan o'tish niyati —
+    # AI oddiy savol-javobni qaytadan boshlamay, DARHOL ism+telefon
+    # so'raydi. INFO — "Batafsil ma'lumot olish" havolasi (/start
+    # store_<uuid>), umumiy qiziqish — AI mijozning savoliga (bo'lsa)
+    # javob beradi, so'ng ism+telefonni TAKLIF qiladi (standart sekin
+    # "isitish" bosqichlarini kutmasdan). Ikkisi ham apps/chat/ai_service.py
+    # da o'qiladi, birinchi AI javobidan so'ng tozalanadi (bir martalik signal).
     entry_mode = models.CharField(
         max_length=20,
         choices=EntryMode.choices,

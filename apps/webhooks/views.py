@@ -265,11 +265,16 @@ class TelegramWebhookView(View):
                 # ⚠️ "register_" — guruhda "juda issiq" (yuqori xarid niyatli) mijozga
                 # ko'rsatiladigan "Ro'yxatdan o'tish" havolasi uchun maxsus prefiks
                 # (qarang: apps/chat/ai_service.py dm_link_register_display) — bu
-                # mijoz ODDIY "Batafsil ma'lumot olish" (store_) havolasi orqali
-                # emas, ANIQ ro'yxatdan o'tish niyati bilan kirganini bildiradi,
-                # shunda shaxsiy chatda AI oddiy savol-javobni qaytadan boshlamay,
-                # darhol ism+telefon so'rashga o'tadi (pastga, CustomerSession.entry_mode'ga qarang).
+                # mijoz ANIQ ro'yxatdan o'tish niyati bilan kirganini bildiradi, shunda
+                # shaxsiy chatda AI oddiy savol-javobni qaytadan boshlamay, darhol
+                # ism+telefon so'rashga o'tadi. "store_" — "Batafsil ma'lumot olish"
+                # havolasi: bu ham ANIQ qiziqish signali (shunchaki kuzatuvchi emas,
+                # maxsus shu yerga kirib kelgan), lekin yumshoqroq — AI savolga javob
+                # berib, SO'NG ism+telefonni taklif qiladi (pastga, CustomerSession.
+                # entry_mode va apps/chat/ai_service.py'ga qarang). "admin_" — do'kon
+                # EGASINING o'z paneliga kirish havolasi, mijoz emas — fast-path TEGISHLI EMAS.
                 is_register_entry = param.startswith("register_")
+                is_store_info_entry = param.startswith("store_")
                 target_key = param
                 for prefix in ("admin_", "store_", "register_"):
                     if param.startswith(prefix):
@@ -316,11 +321,18 @@ class TelegramWebhookView(View):
                         and previous_session.active_store_id != target_store.id
                     )
 
+                    if is_register_entry:
+                        resolved_entry_mode = CustomerSession.EntryMode.REGISTER
+                    elif is_store_info_entry:
+                        resolved_entry_mode = CustomerSession.EntryMode.INFO
+                    else:
+                        resolved_entry_mode = ""
+
                     CustomerSession.objects.update_or_create(
                         platform_user_id=sender_id,
                         defaults={
                             "active_store": target_store,
-                            "entry_mode": CustomerSession.EntryMode.REGISTER if is_register_entry else "",
+                            "entry_mode": resolved_entry_mode,
                         }
                     )
 

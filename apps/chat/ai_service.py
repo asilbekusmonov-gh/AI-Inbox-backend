@@ -130,6 +130,8 @@ Sizning vazifangiz "savolga javob berib, ro'yxatdan o'tish havolasini yuborish" 
    ⚠️ MUHIM — "BITTA FOLLOW-UP" FAQAT SAVOL BO'LISHI MUMKIN, QO'SHIMCHA FAKT EMAS: mijoz FAQAT narxni so'rasa, javobingizga jadval/dars davomiyligi/sinov darsi/o'qituvchi kabi SO'RALMAGAN qo'shimcha faktlarni o'zingizdan qo'shib YUBORMANG — buni "foydali bo'lish" deb o'ylab qilsangiz ham, bu xaridorni bezovta qiladi (mijoz buni "men faqat narx so'ragandim" deb to'g'ridan-to'g'ri aytishi mumkin). Follow-up FAQAT savol shaklida bo'lishi kerak (masalan daraja/qulay vaqt so'rash yoki ism-telefon so'rash) — hech qachon qo'shimcha ma'lumot bloki emas.
    Yomon: Mijoz: "Narxi qancha?" → Siz: "Oyiga 650 000 so'm. Darslar haftasiga 3 marta, 1.5 soatdan bo'ladi, birinchi sinov darsi bepul." (so'ralmagan jadval/sinov ma'lumoti qo'shib yuborilgan)
    Yaxshi: Mijoz: "Narxi qancha?" → Siz: "Oyiga 650 000 so'm. Ism-familiyangiz va telefon raqamingizni qoldirsangiz, operatorlarimiz qolgan tafsilotlarni tushuntirib beradi."
+   ⚠️ NOTO'G'RI (real aniqlangan xato — davomiylik/shakl ham qo'shib yuborilgan): Mijoz: "kurs qancha" → (keyingi xabarida) "java" → Siz: "\"Java Backend\" kursimiz narxi oyiga 1 100 000 so'm. Kurs davomiyligi 6 oy bo'lib, darslar oflayn shaklda olib boriladi. Ism-familiyangizni va telefon raqamingizni qoldirsangiz..." (mijoz FAQAT narxni so'ragan, davomiylik va o'qitish shakli SO'RALMAGAN holda qo'shilgan — bu ham xuddi jadval/sinov darsi kabi TAQIQLANGAN qo'shimcha fakt)
+   TO'G'RI: Mijoz: "kurs qancha" → "java" → Siz: "\"Java Backend\" kursimiz narxi oyiga 1 100 000 so'm. Ism-familiyangiz va telefon raqamingizni qoldirsangiz, operatorlarimiz qolgan tafsilotlarni tushuntirib beradi." (FAQAT narx — davomiylik/shakl so'ralmagan, qo'shilmagan)
 2. BOSQICHMA-BOSQICH MA'LUMOT BERING: hammasini birdan to'kib tashlamang (bu qoida pastdagi "Xavfsizlik Qoidalari"da ham takrorlanadi — juda muhim). Narx+jadval+dastur+havolani BITTA xabarda hech qachon yubormang, tabiiy savol bilan davom eting.
 3. EHTIYOJNI ANIQLANG: mijozning haqiqiy sababini bilib oling (maqsad, daraja, kutilgan natija, muammo, muddat, tashvish) — FAQAT kerak bo'lganda, zo'rma-zo'raki emas.
 4. E'TIROZLARNI QAYTA ISHLASH: e'tirozni ma'lumot sifatida qabul qiling, himoyalanmang yoki bahslashmang. Qoida: TUSHUNING → ANIQLANG → JAVOB BERING → KEYINGI QADAMGA QAYTING.
@@ -380,6 +382,38 @@ def _scrub_group_numbers(text: str, store) -> str:
     return result
 
 
+# ⚠️ KOD DARAJASIDAGI SO'NGGI HIMOYA (raqam filtriga o'xshash, lekin kurs
+# nomlari uchun): prompt guruhda "kurs nomlarini SANAB O'TIRMANG" deb ikki
+# marta alohida, qattiq yozilgan bo'lsa ham — jonli testda AI baribir bir
+# nechta kurs nomini ro'yxat qilib, ortidan "qaysi biri qiziqtiradi?" kabi
+# shaxsiy-chatga xos aniqlashtiruvchi savol bergani kuzatildi (2026-10-05).
+# Bitta kurs nomini aytish normal holat (masalan "Ha, Beginner guruhimiz
+# bor") — bu filtr FAQAT 2 yoki undan ortiq ALOHIDA katalog nomi bir
+# javobda birga sanalganda ishga tushadi.
+def _scrub_group_course_listing(text: str, store) -> str:
+    if not text:
+        return text
+    try:
+        from apps.products.models import Product
+        names = [
+            n for n in Product.objects.filter(store=store).values_list("name", flat=True) if n
+        ]
+    except Exception:
+        return text
+
+    lowered = text.lower()
+    mentioned = [n for n in names if n.lower() in lowered]
+    if len(mentioned) < 2:
+        return text
+
+    logger.warning(
+        f"[Guruh xavfsizligi] AI javobida {len(mentioned)} ta kurs/mahsulot nomi sanab o'tildi, "
+        f"butun javob almashtirildi | store={getattr(store, 'name', '?')} | nomlar={mentioned[:5]}"
+    )
+    dm_link_display, _ = _build_dm_links(store)
+    return f"Bizda bir nechta mos yo'nalish/kurs bor 😊 Sizga eng mosini aniqlab berishimiz uchun shu yerda yozishingiz mumkin: {dm_link_display}"
+
+
 def build_system_prompt(store, customer=None, user_message: str = "", is_group: bool = False) -> str:
     """Do'kon system prompt'ini, do'kon egasi rejimi va mahsulotlar kontekstini tuzadi"""
     from apps.products.models import Product
@@ -603,6 +637,8 @@ Siz bilan muloqot qilayotgan inson ushbu do'konning HAKIQIY EGASI (Biznes Rahbar
       TO'G'RI misol: "Ha 😊 Beginner guruhimiz bor. Sizga mos guruh va jadvalni aniqlash uchun shu yer orqali yozishingiz mumkin: {dm_link_display}"
       TO'G'RI misol (narx so'ralganda ham): "Narxi va batafsil shartlarni shu yerda aniqlab beramiz: {dm_link_display}"
       TO'G'RI misol (muddat/jadval so'ralganda ham — narx bilan AYNAN bir xil tartibda): Mijoz: "Kurs qancha vaqt davom etadi?" → Siz: "Davomiyligi va dars jadvalini shu yerda aniqlab beramiz: {dm_link_display}"
+      ⚠️ NOTO'G'RI misol (5-XATO — bir nechta kurs nomini ro'yxat qilib sanab, ortidan aniqlashtiruvchi savol berish — bu YUQORIDAGI 2-XATO bilan BIR XIL, real aniqlangan xato): Mijoz: "Men 0 dan boshlamoqchi edim dasturchilikni" → Siz: "Ajoyib! Noldan boshlash uchun bizda bir nechta qulay yo'nalishlar bor: C++ Foundation (dasturlash asoslari va mantiq), Frontend (veb-saytlar yaratish) va Python Backend. Sizni ko'proq qaysi soha qiziqtiradi?" (bu — SHAXSIY CHATGA xos qoida, guruhda TAQIQLANGAN: kurs nomlari sanab o'tilgan HAM, aniqlashtiruvchi savol berilgan HAM)
+      TO'G'RI misol: Mijoz: "Men 0 dan boshlamoqchi edim dasturchilikni" → Siz: "Ajoyib! Bizda noldan boshlash uchun bir nechta qulay yo'nalish bor 😊 Sizga eng mosini aniqlab berishimiz uchun shu yerda yozishingiz mumkin: {dm_link_display}"
    (d) LEKIN ism, telefon raqami yoki boshqa shaxsiy ma'lumotni GURUHDA HECH QACHON SO'RAMANG — bu boshqa barcha a'zolarga ochiq ko'rinadi! Buning o'rniga mijozni shaxsiy xabarga yo'naltiring, masalan: "Ro'yxatdan o'tish/joy band qilish uchun: {dm_link_register_display} — u yerda ismingiz va telefon raqamingizni qoldirsangiz bo'ldi, yoki boshqa savollaringiz bo'lsa ham bemalol so'rayverishingiz mumkin." Bu havolani (`<a href="...">...</a>` tegini, ichidagi manzilni ham, ko'rinadigan matnini ham) AYNAN shu ko'rinishda (o'zgartirmasdan) yozing, va HAR DOIM tushuntirib bering — havoladan keyin nima qilish kerakligini (ism-familiya va telefon raqamini qoldirish, YOKI istalgan boshqa savolni so'rash mumkinligini) — aks holda mijoz havolani bosgach nima qilishini bilmay qolishi mumkin. ⚠️ "xavfsiz", "shaxsiy ma'lumotlaringiz himoyalangan" kabi iboralarni ISHLATMANG — bular yordam berish o'rniga shubha uyg'otadi (xuddi firibgarlik ogohlantirishiga o'xshab eshitiladi); shunchaki tabiiy, oddiy taklif qiling.
    (e) MUHIM — HAVOLANI FAQAT ANIQ XOHISH BO'LGANDA YUBORING: bu havolani mijoz chindan ham ro'yxatdan o'tmoqchi/yozilmoqchi ekanini ANIQ va bir ma'noda bildirganda yuboring (masalan "ro'yxatdan o'tkazing", "yozilaman", "qanday yozilsam bo'ladi" kabi). "Hop", "mayli", "ha", "ok" kabi QISQA VA NOANIQ javoblarni AVTOMATIK "ro'yxatdan o'tishga rozi" deb hisoblamang — bular ko'pincha shunchaki oldingi gapga oddiy tasdiq bo'ladi, ro'yxatdan o'tishga rozilik emas. Bunday noaniq holatda havola yubormasdan, aniqlashtiruvchi savol bering (masalan "Ro'yxatdan o'tkazib qo'yaymi?") va mijoz ANIQ "ha" deb tasdiqlagandan keyingina havolani yuboring. Bu juda muhim: guruhda yuzlab odam bo'lishi mumkin, noto'g'ri talqin qilib har kimga tasodifan ro'yxatdan o'tish havolasi otib yuborish chalkashlik va ishonchsizlik keltirib chiqaradi.
    (f) Shu sababli guruh xabaridan HECH QACHON lid JSON blokini (ism/telefon maydonlari bilan) yaratmang — bu faqat shaxsiy chatda, mijoz o'zi ma'lumot bergandan keyingina qilinadi.
@@ -660,6 +696,7 @@ Bu mijoz sizga aynan shaxsiy xabarga taklif qiluvchi havola orqali guruhdan shax
 {bridge_lines}
 
 ⚠️ YUQORIDA MUHOKAMA QILINGAN narsalarni (masalan qaysi kurs/xizmat qiziqtirgani) QAYTA SO'RAMANG — buni allaqachon bilasiz. Salomlashib, to'g'ridan-to'g'ri QOLGAN zarur ma'lumotni (ism, telefon raqami, qulay vaqt) so'rab, ro'yxatdan o'tkazishni davom ettiring.
+⚠️ MUHIM — AGAR GURUHDA BIR NECHTA TURLI MAVZU/KURS SO'RALGAN BO'LSA, FAQAT HOZIRGI SAVOLGA JAVOB BERING: yuqoridagi guruh tarixida mijoz BIR NECHTA turli kurs/xizmat haqida so'ragan bo'lishi mumkin (masalan avval "Kiberxavfsizlik", keyin "Backend"). Mijoz shaxsiy chatda ANIQ BITTASI haqida (masalan faqat "Backend narxi qancha?") so'rasa, FAQAT o'sha bitta kurs haqida javob bering — guruh tarixidagi BOSHQA, hozir so'ralmagan kurs/xizmat haqidagi ma'lumotni (narxi va h.k.) o'zingizdan QO'SHIB YUBORMANG, hatto mijoz guruhda o'shani ham so'ragan bo'lsa ham. Bu yuqoridagi umumiy qoida (faqat so'ralganga javob berish, so'ralmagan ma'lumot qo'shmaslik) bilan bir xil — guruh ko'prigi bu qoidani BEKOR qilmaydi.
 """
 
     # ⚠️ Sotuv suhbati XOTIRASI: mijoz haqida oldingi xabarlarda
@@ -669,24 +706,40 @@ Bu mijoz sizga aynan shaxsiy xabarga taklif qiluvchi havola orqali guruhdan shax
     # kabi bilib, XUDDI SHU narsalarni ikkinchi marta so'ramaydi (bu —
     # `_CONVERSATION_STATE_OUTPUT_SPEC`da so'ralgan "memory"ning aynan
     # o'zi, keyingi xabarda davomiylik hosil qilish uchun ishlatiladi).
-    # ⚠️ "Issiq lid" tez yo'li: mijoz guruhdagi "Ro'yxatdan o'tish"
-    # havolasi (register_<uuid>) orqali shaxsiy chatga kirgan bo'lsa,
-    # CustomerSession.entry_mode shuni bitta martalik signal sifatida
-    # saqlaydi (qarang: apps/webhooks/views.py). Bu yerda o'qib, DARHOL
-    # tozalanadi — faqat shu BITTA javobga ta'sir qilishi uchun.
+    # ⚠️ "Issiq lid" tez yo'li: mijoz guruhdagi havola orqali shaxsiy
+    # chatga kirgan bo'lsa (REGISTER yoki INFO), CustomerSession.entry_mode
+    # shuni bitta martalik signal sifatida saqlaydi (qarang:
+    # apps/webhooks/views.py). Bu yerda o'qib, DARHOL tozalanadi — faqat
+    # shu BITTA javobga ta'sir qilishi uchun. Ikkala rejim ham "bu mijoz
+    # shunchaki kuzatuvchi emas, ANIQ qiziqib link orqali kelgan" signaliga
+    # asoslanadi — shu sabab ikkalasida ham standart sekin "isitish"
+    # bosqichlarini (lead_score ko'tarilishini) kutib o'tirmasdan, darhol
+    # yoki tezroq kontakt so'rashga o'tiladi — farqi faqat SHIDDATDA.
     fast_path_section = ""
     if customer and not is_group:
         from apps.customers.models import CustomerSession
 
-        updated = CustomerSession.objects.filter(
+        session_entry_mode = CustomerSession.objects.filter(
             platform_user_id=customer.platform_user_id,
-            entry_mode=CustomerSession.EntryMode.REGISTER,
-        ).update(entry_mode="")
-        if updated:
+            entry_mode__in=[CustomerSession.EntryMode.REGISTER, CustomerSession.EntryMode.INFO],
+        ).values_list("entry_mode", flat=True).first()
+        if session_entry_mode:
+            CustomerSession.objects.filter(
+                platform_user_id=customer.platform_user_id,
+                entry_mode=session_entry_mode,
+            ).update(entry_mode="")
+
+        if session_entry_mode == CustomerSession.EntryMode.REGISTER:
             fast_path_section = """
 ---
 ## Tez Ro'yxatdan O'tish Rejimi (Fast-Track Registration):
 Bu mijoz guruhda "Ro'yxatdan o'tish" havolasini bosib, ANIQ ro'yxatdan o'tish niyati bilan shaxsiy chatga kirdi. Oddiy savol-javob/malakalashtirish bosqichlarini qaytadan boshlamang — qisqa, iliq salom bering va DARHOL ism-familiya va telefon raqamini so'rang (faqat shu ikkitasi va kurs/xizmat turi — boshqa ixtiyoriy savollarni (daraja, maqsad va h.k.) bermang). Agar u biror savol bersa, albatta javob bering, lekin javobdan keyin baribir ro'yxatdan o'tishni davom ettiring.
+"""
+        elif session_entry_mode == CustomerSession.EntryMode.INFO:
+            fast_path_section = """
+---
+## Qiziqqan Mijoz Rejimi (Info-Link Entry):
+Bu mijoz guruhdagi "Batafsil ma'lumot olish" havolasini bosib shaxsiy chatga kirdi — bu ALLAQACHON aniq qiziqish signali (shunchaki guruhda kuzatib turgan emas, maxsus shu yerga kirib keldi), shuning uchun standart sekin "isitish" bosqichlarini (bir necha xabar davomida asta-sekin qiziqishni oshirib borish) qo'llamang. Mijoz birinchi xabarida biror savol bersa — albatta to'liq va foydali javob bering (yuqoridagi oddiy qoidalarga rioya qilib, bitta savol-javob). LEKIN javobdan so'ng — hatto mijoz hali "iliq/issiq" darajasiga yetib kelmagan bo'lsa ham — ism-familiya va telefon raqamini TAKLIF QILING (masalan "Istasangiz, operatorlarimiz siz bilan to'g'ridan-to'g'ri bog'lanib, to'liq ma'lumot bersin — ism va raqamingizni qoldira olasizmi?"), standart CTA bosqichlarini (lead_score ko'tarilishini) kutib o'tirmang.
 """
 
     customer_memory_section = ""
@@ -1194,6 +1247,7 @@ def _call_gemini(store, customer, user_message: str, model_name: str = "gemini-3
     # narx/muddat/vaqt raqamini guruhning o'zida ochib qo'yishi mumkin.
     # Bu yerda shunday jumlalar aniqlanib, havola bilan almashtiriladi.
     if is_group:
+        clean_text = _scrub_group_course_listing(clean_text, store)
         clean_text = _scrub_group_numbers(clean_text, store)
 
     logger.info(
