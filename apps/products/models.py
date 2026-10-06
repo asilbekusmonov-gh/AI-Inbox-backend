@@ -127,6 +127,19 @@ class Product(BaseModel):
             is_deleted=False
         )
 
+        # ⚠️ BUG FIX: agar do'konning BARCHA aktiv mahsulotlari soni
+        # `limit`dan kam yoki teng bo'lsa, so'z-moslik filtri umuman
+        # KERAK EMAS — baribir hammasi sig'adi. Jonli holatda aniqlangan
+        # xato: mijoz umumiy ("kurs haqida ma'lumot bering") so'rov
+        # yuborganda, filtr mijoz so'zlari bilan TASODIFIY mos kelmagan
+        # mahsulotlarni (masalan "Frontend Development", "Python Backend
+        # Development") natijadan butunlay OLIB TASHLAR edi — garchi
+        # ularning soni limitga sig'sa ham. Katalog kichik bo'lsa, filtr
+        # o'rniga to'g'ridan-to'g'ri HAMMASINI qaytarish xavfsizroq.
+        total_active = base_qs.count()
+        if total_active <= limit:
+            return base_qs[:limit]
+
         if not query_text or not query_text.strip():
             return base_qs[:limit]
 

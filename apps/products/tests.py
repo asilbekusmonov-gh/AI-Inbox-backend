@@ -161,3 +161,48 @@ class SearchForAiCyrillicMatchTestCase(TestCase):
         names = [p.name for p in results]
         self.assertIn(self.beginner.name, names)
         self.assertIn(self.ielts.name, names)
+
+
+class SearchForAiSmallCatalogNoFilterTestCase(TestCase):
+    """
+    Jonli holatda aniqlangan xato (2026-10-06, PDP Academy): do'konda
+    5 ta mahsulot bor (limit bilan AYNAN teng), mijoz umumiy ("kurs
+    haqida ma'lumot bering") so'rov yuborganda, so'z-moslik filtri
+    TASODIFIY ravishda 2 tasini (nomi/tavsifi so'rov so'zlari bilan mos
+    kelmagani uchun) natijadan olib tashlagan — garchi hammasi limitga
+    sig'sa ham. Endi katalog hajmi limitdan kam/teng bo'lsa, filtr
+    umuman qo'llanmaydi.
+    """
+
+    def setUp(self):
+        owner = User.objects.create_user(username="small_catalog_owner", password="x")
+        self.store = Store.objects.create(owner=owner, name="Kichik Katalog Markazi", category_type="education")
+        self.products = [
+            Product.objects.create(
+                store=self.store, category_type="education",
+                name=name, price=500000, description=desc,
+            )
+            for name, desc in [
+                ("Java Backend & Spring Boot Development", "Enterprise darajasidagi Java va Spring Boot kursi"),
+                ("C++ Foundation (Dasturlash Asoslari va Algoritmlar)", "Dasturlashni noldan puxta o'rganing"),
+                ("Practical Cybersecurity & Ethical Hacking", "Kiberxavfsizlik va etik hakerlik bo'yicha amaliyot"),
+                ("Frontend Development (HTML, CSS, JavaScript & React)", "Noldan Junior Frontend dasturchi bo'ling"),
+                ("Python Backend Development", "Noldan Python Backend va Django'ni professional o'rganing"),
+            ]
+        ]
+
+    def test_generic_query_returns_all_products_when_catalog_fits_limit(self):
+        results = Product.search_for_ai(
+            self.store, "Ассаламу алейкум курс хакида малумот беринг", limit=5,
+        )
+        names = {p.name for p in results}
+        self.assertEqual(names, {p.name for p in self.products})
+
+    def test_catalog_larger_than_limit_still_filters(self):
+        Product.objects.create(
+            store=self.store, category_type="education",
+            name="Qo'shimcha Oltinchi Kurs", price=500000, description="Boshqa kurs",
+        )
+        results = Product.search_for_ai(self.store, "Python backend", limit=5)
+        names = {p.name for p in results}
+        self.assertIn("Python Backend Development", names)
