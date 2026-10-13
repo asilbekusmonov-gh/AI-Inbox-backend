@@ -15,6 +15,7 @@ import re
 from datetime import timedelta
 from typing import Optional
 
+from django.db import transaction
 from django.utils import timezone
 
 logger = logging.getLogger("apps.chat")
@@ -85,23 +86,84 @@ def _find_interested_course(store, name: str):
     return candidates[0]
 
 
-def _clean_and_check_phone(raw_phone: str) -> tuple[str, bool]:
+# ⚠️ Telefon raqami uchun qabul qilinadigan xona chegaralari:
+# O'zbekiston milliy raqami 9 xonali ("901234567"), xalqaro kod bilan
+# 12 xonali ("998901234567"). Boshqa davlat raqamlari ham kelishi
+# mumkinligi uchun yuqori chegara E.164 standartidagi 15 xona qilib
+# olingan — ya'ni qoida "faqat O'zbekiston" emas, lekin telefon
+# raqami BO'LA OLMAYDIGAN qiymatlarni aniq rad etadi.
+_PHONE_MIN_DIGITS = 9
+_PHONE_MAX_DIGITS = 15
+
+# Telefon raqamida uchrashi mumkin bo'lgan ajratuvchilar (bular
+# normallashtirishda olib tashlanadi): bo'shliq, qavs, chiziqcha, nuqta.
+_PHONE_ALLOWED_NON_DIGITS = re.compile(r"^[\d\s()+\-.]+$")
+
+
+def _normalize_phone(raw_phone: str) -> tuple[Optional[str], Optional[str]]:
     """
-    Telefon raqamini tozalaydi va shubhali (harf aralashgan, juda qisqa/
-    uzun) qiymatlarni aniqlaydi. AI ba'zan raqamga harf qo'shib qo'yishi
-    yoki noto'g'ri formatda yozishi mumkin — bunday holatlarni jimgina
-    o'tkazib yubormasdan, keyinroq do'kon egasi tekshirishi uchun
-    belgilaymiz.
+    Telefon raqamini DETERMINISTIK tekshiradi va normallashtiradi.
+
+    ⚠️ Nega bu AI promptiga tashlab qo'yilmaydi: AI mijozning xabaridan
+    raqamni noto'g'ri ajratib olishi mumkin — jonli holatda aniqlangan
+    misol: mijoz "ali 987654" deb yozganda, AI buni ism="ali",
+    telefon="987654" deb ajratib yuborgan. "987654" — telefon raqami
+    emas (atigi 6 xona), lekin avval bu qiymat shunchaki "shubhali" deb
+    belgilanib, lid BARIBIR yaratilardi: do'kon egasiga soxta kontaktli
+    "YANGI LID" xabarnomasi borardi, CRM'ga ham o'sha yaroqsiz raqam
+    yuborilardi, mijozga esa "ma'lumotlaringiz qabul qilindi" deyilardi.
+    Endi bunday qiymat lid yaratilishini TO'XTATADI (chaqiruvchi tomon
+    mijozdan raqamni qayta so'raydi).
 
     Returns:
-        (tozalangan_raqam, shubhalimi)
+        (normallashtirilgan_raqam, None) — raqam yaroqli
+        (None, sabab) — raqam yaroqsiz, lid yaratilmasligi kerak
     """
-    has_letters = bool(re.search(r"[a-zA-Zа-яА-ЯЎўҚқҲҳ]", raw_phone))
-    plus_prefix = "+" if raw_phone.strip().startswith("+") else ""
-    digits_only = re.sub(r"\D", "", raw_phone)
-    cleaned = f"{plus_prefix}{digits_only}" if digits_only else raw_phone.strip()
-    is_suspicious = has_letters or len(digits_only) < 9 or len(digits_only) > 15
-    return cleaned, is_suspicious
+    raw = (raw_phone or "").strip()
+    if not raw:
+        return None, "bo'sh"
+
+    # Harf yoki boshqa begona belgi bo'lsa — bu toza telefon raqami emas
+    # (masalan "ali 987654", "раqam yo'q", "+998 90 ... (ish raqami)").
+    if not _PHONE_ALLOWED_NON_DIGITS.match(raw):
+        return None, "raqamdan tashqari belgilar bor"
+
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) < _PHONE_MIN_DIGITS:
+        return None, f"juda qisqa ({len(digits)} xona)"
+    if len(digits) > _PHONE_MAX_DIGITS:
+        return None, f"juda uzun ({len(digits)} xona)"
+
+    plus_prefix = "+" if raw.startswith("+") else ""
+    return f"{plus_prefix}{digits}", None
+
+
+def _validate_full_name(raw_name: str) -> tuple[Optional[str], Optional[str]]:
+    """
+    Ism-familiyani DETERMINISTIK tekshiradi va ortiqcha bo'shliqlardan
+    tozalaydi.
+
+    ⚠️ Ataylab YUMSHOQ qoida: faqat ism BO'LA OLMAYDIGAN qiymatlar rad
+    etiladi (raqamdan iborat, umuman harfsiz, bitta belgili). Lotin,
+    kirill, apostrof ("G'ulom"), chiziqcha ("Abdulla-bek") va bitta
+    so'zli ismlar — hammasi YAROQLI. Sabab: haddan tashqari qattiq
+    qoida haqiqiy mijozni yo'qotadi, bu esa lid yig'ish maqsadiga zid.
+
+    Returns:
+        (tozalangan_ism, None) — ism yaroqli
+        (None, sabab) — ism yaroqsiz, lid yaratilmasligi kerak
+    """
+    name = " ".join((raw_name or "").split())
+    if not name:
+        return None, "bo'sh"
+    if len(name) < 2:
+        return None, "juda qisqa"
+    # Kamida bitta harf bo'lishi SHART — "+998901234567", "123", "???",
+    # faqat emoji kabi qiymatlar ism emas (ko'pincha AI maydonlarni
+    # almashtirib yuborgan holat: telefon raqami ism maydoniga tushgan).
+    if not re.search(r"[^\W\d_]", name, re.UNICODE):
+        return None, "harf yo'q (ism emas)"
+    return name, None
 
 
 def create_lead_from_ai_data(
@@ -144,16 +206,20 @@ def create_lead_from_ai_data(
         phone = str(lead_data.get("phone", "")).strip()
         notes = str(lead_data.get("notes", "")).strip()
 
-        if not full_name:
-            logger.warning("Lid yaratish: full_name bo'sh!")
-            return None
-        if not phone:
-            logger.warning("Lid yaratish: phone bo'sh!")
+        # ⚠️ DETERMINISTIK validatsiya — AI javobiga ishonib qolmaymiz.
+        # Yaroqsiz kontakt bilan lid YARATILMAYDI: chaqiruvchi (webhooks/
+        # tasks.py) `None` javobini ko'rib, mijozdan ma'lumotni qayta
+        # so'raydi — shunda do'kon egasiga soxta kontakt ham bormaydi,
+        # CRM'ga ham yaroqsiz raqam yuborilmaydi.
+        full_name, name_error = _validate_full_name(full_name)
+        if name_error:
+            logger.warning(f"Lid yaratish rad etildi: ism yaroqsiz ({name_error})")
             return None
 
-        phone, phone_suspicious = _clean_and_check_phone(phone)
-        if phone_suspicious:
-            notes = (notes + " | " if notes else "") + f"⚠️ Telefon raqami shubhali ko'rinadi, tekshiring: {phone}"
+        phone, phone_error = _normalize_phone(phone)
+        if phone_error:
+            logger.warning(f"Lid yaratish rad etildi: telefon yaroqsiz ({phone_error})")
+            return None
 
         # Qiziqqan kurs/mahsulot/xizmat nomi — toifaga qarab turli kalitdan kelishi mumkin
         interest_name = (
@@ -196,38 +262,46 @@ def create_lead_from_ai_data(
             )
             return None
 
-        lead = Lead.objects.create(
-            store=store,
-            customer=customer,
-            platform=platform,
-            source=source,
-            customer_full_name=full_name,
-            customer_phone=phone,
-            interested_course=interested_course,
-            lead_status=lead_status,
-            notes=notes,
-            source_message=source_message,
-        )
+        # ⚠️ Uchta yozuv (Lead yaratish, Customer'ga ism/telefonni
+        # ko'chirish, total_leads sanog'i) BITTA tranzaksiyada bajariladi
+        # — aks holda oradagi xato/uzilish "yarim yozilgan" holat
+        # qoldirardi (masalan lid bor, lekin mijoz kartochkasida telefon
+        # yo'q yoki sanoq noto'g'ri). Bu yerda tashqi chaqiruv (Telegram/
+        # CRM) YO'Q — ular yuqori qatlamda, tranzaksiyadan TASHQARIDA
+        # bajariladi, shuning uchun tranzaksiya qisqa va xavfsiz.
+        with transaction.atomic():
+            lead = Lead.objects.create(
+                store=store,
+                customer=customer,
+                platform=platform,
+                source=source,
+                customer_full_name=full_name,
+                customer_phone=phone,
+                interested_course=interested_course,
+                lead_status=lead_status,
+                notes=notes,
+                source_message=source_message,
+            )
 
-        # ── Mijoz ma'lumotlarini yangilash ─────────────────────────
-        # Agar birinchi marta ism/raqam olingan bo'lsa — Customer'ga ham yozamiz
-        update_fields = []
-        if not customer.full_name and full_name:
-            customer.full_name = full_name
-            update_fields.append("full_name")
-        if not customer.phone_number and phone:
-            customer.phone_number = phone
-            update_fields.append("phone_number")
-        if update_fields:
-            update_fields.append("updated_at")
-            customer.save(update_fields=update_fields)
+            # ── Mijoz ma'lumotlarini yangilash ─────────────────────────
+            # Agar birinchi marta ism/raqam olingan bo'lsa — Customer'ga ham yozamiz
+            update_fields = []
+            if not customer.full_name and full_name:
+                customer.full_name = full_name
+                update_fields.append("full_name")
+            if not customer.phone_number and phone:
+                customer.phone_number = phone
+                update_fields.append("phone_number")
+            if update_fields:
+                update_fields.append("updated_at")
+                customer.save(update_fields=update_fields)
 
-        # Lid sonini yangilash
-        from django.db.models import F
-        from apps.customers.models import Customer as CustomerModel
-        CustomerModel.objects.filter(id=customer.id).update(
-            total_leads=F('total_leads') + 1
-        )
+            # Lid sonini yangilash
+            from django.db.models import F
+            from apps.customers.models import Customer as CustomerModel
+            CustomerModel.objects.filter(id=customer.id).update(
+                total_leads=F('total_leads') + 1
+            )
 
         logger.info(
             f"Yangi lid yaratildi: {lead.lead_number} | "

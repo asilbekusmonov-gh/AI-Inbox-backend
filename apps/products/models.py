@@ -58,6 +58,24 @@ class Product(BaseModel):
         null=True,
         help_text="Mahsulot tavsifi, rangi, o'lchamlari va xususiyatlari"
     )
+    # ⚠️ Bu — `description`dan BOSHQA maqsadli maydon:
+    #   • `description` — QISQA (1-2 gap) tavsif, AI'ning HAR BIR so'rovida
+    #     katalog kontekstiga qo'shiladi (apps/chat/ai_service.py:632).
+    #   • `full_info`  — kurs qo'shilganda yuklangan faylning TO'LIQ matni
+    #     (narx, jadval, dastur, smenalar — hammasi, asl formatida).
+    #     Promptga QO'SHILMAYDI (token xarajati oshmasligi uchun) —
+    #     faqat mijoz kontakt berishni ANIQ rad etib, "shu yerda ayting"
+    #     deganda, kod darajasida AYNAN shu matn yuboriladi
+    #     (SEND_FULL_INFO sentineli — apps/chat/ai_service.py).
+    full_info = models.TextField(
+        blank=True,
+        null=True,
+        help_text=(
+            "Kurs/xizmat haqida to'liq matn (yuklangan fayldan). Mijoz "
+            "kontakt qoldirishni rad etib, ma'lumotni shu yerda so'raganda "
+            "aynan shu matn yuboriladi."
+        )
+    )
     price = models.DecimalField(
         max_digits=12,
         decimal_places=2,

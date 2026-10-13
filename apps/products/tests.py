@@ -116,6 +116,79 @@ class AnalyzeProductFileTestCase(APITestCase):
         self.assertIsNone(call_kwargs["price"])
 
 
+class AnalyzeFileFullTextTestCase(APITestCase):
+    """
+    Fayldagi TO'LIQ matn javobda qaytishi kerak — u `Product.full_info`ga
+    saqlanadi va mijoz kontakt qoldirishni rad etganda AYNAN shu matn
+    yuboriladi (apps/chat/ai_service.py, SEND_FULL_INFO).
+    """
+
+    def setUp(self):
+        self.owner = User.objects.create_user(username="fulltext_owner", password="x")
+        self.store = Store.objects.create(
+            owner=self.owner, name="Full Text Markaz", category_type="education",
+        )
+
+    @patch("apps.products.ai_service.analyze_product_file")
+    def test_full_text_is_returned_in_response(self, mock_analyze):
+        full = "🌟 Foundation 🌟\n\n📅 Davomiyligi: 3 oy\n💵 Narxi: 1 500 000 so'm"
+        mock_analyze.return_value = {
+            "name": "Foundation", "price": 1500000, "description": "Qisqa tavsif",
+            "category": "", "stock": 0, "duration": "", "location": "",
+            "full_text": full, "custom_fields": [],
+        }
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.post(
+            "/api/v1/products/analyze-file/",
+            {"file": SimpleUploadedFile("kurs.md", b"# Foundation", content_type="text/markdown")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        # Matn qisqartirilmasdan, aynan o'zi qaytishi kerak
+        self.assertEqual(response.json()["full_text"], full)
+
+    @patch("apps.products.ai_service.analyze_product_file")
+    def test_missing_full_text_becomes_empty_string(self, mock_analyze):
+        mock_analyze.return_value = {
+            "name": "Foundation", "price": 0, "description": "", "category": "",
+            "stock": 0, "duration": "", "location": "", "custom_fields": [],
+        }
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.post(
+            "/api/v1/products/analyze-file/",
+            {"file": SimpleUploadedFile("kurs.md", b"matn", content_type="text/markdown")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["full_text"], "")
+
+
+class ProductFullInfoSerializerTestCase(APITestCase):
+    """`full_info` serializer oq ro'yxatida bo'lishi kerak, aks holda
+    frontend yuborgan to'liq matn jimgina tashlab yuborilardi."""
+
+    def setUp(self):
+        self.owner = User.objects.create_user(username="fullinfo_api_owner", password="x")
+        self.store = Store.objects.create(
+            owner=self.owner, name="API Markaz", category_type="education",
+        )
+
+    def test_full_info_is_saved_through_api(self):
+        self.client.force_authenticate(user=self.owner)
+        full = "To'liq kurs ma'lumoti\nNarxi: 1 500 000 so'm"
+        response = self.client.post(
+            "/api/v1/products/",
+            {"name": "Foundation", "price": 1500000, "stock": 10, "full_info": full},
+            format="json",
+        )
+
+        self.assertIn(response.status_code, (200, 201), response.content)
+        product = Product.objects.get(store=self.store, name="Foundation")
+        self.assertEqual(product.full_info, full)
+
+
 class CyrillicTransliterationTestCase(TestCase):
     def test_basic_word_transliterated(self):
         self.assertEqual(transliterate_uz_cyrillic_to_latin("нолдан"), "noldan")

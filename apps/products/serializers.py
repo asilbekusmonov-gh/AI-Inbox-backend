@@ -20,6 +20,9 @@ class ProductSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "description",
+            # Fayldan olingan to'liq matn — mijoz kontaktni rad etganda
+            # aynan shu yuboriladi (apps/chat/ai_service.py, SEND_FULL_INFO).
+            "full_info",
             "price",
             "stock",
             "sku",

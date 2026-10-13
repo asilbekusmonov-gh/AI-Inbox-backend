@@ -188,6 +188,11 @@ class ProductViewSet(viewsets.ModelViewSet):
                 "stock": result.get("stock") or 0,
                 "duration": str(result.get("duration") or "").strip(),
                 "location": str(result.get("location") or "").strip(),
+                # Fayldagi TO'LIQ matn — `Product.full_info`ga saqlanadi va
+                # mijoz kontakt qoldirishni rad etib "shu yerda ayting"
+                # deganda aynan shu yuboriladi (apps/chat/ai_service.py,
+                # SEND_FULL_INFO). Qisqartirilmaydi.
+                "full_text": str(result.get("full_text") or "").strip(),
                 "custom_fields": cleaned_custom_fields,
             },
             status=status.HTTP_200_OK,

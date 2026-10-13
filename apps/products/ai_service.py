@@ -227,7 +227,7 @@ def analyze_product_file(
         f"Uning tarkibidagi ma'lumotlarni o'qib, quyidagi JSON formatda "
         f"strukturaviy ma'lumot chiqar:\n\n"
         '{"name": "...", "price": 0, "description": "...", "category": "...", "stock": 0, '
-        '"duration": "...", "location": "...", '
+        '"duration": "...", "location": "...", "full_text": "...", '
         '"custom_fields": [{"key": "...", "value": "..."}]}\n\n'
         "Qoidalar:\n"
         "- FAQAT JSON obyekt qaytar — boshqa hech qanday matn, izoh yoki ```json belgisi qo'shma.\n"
@@ -241,6 +241,12 @@ def analyze_product_file(
         "- \"stock\" — bo'sh joy/dona soni faylda aniq aytilgan bo'lsa shu son, aks holda 0.\n"
         "- \"duration\" — davomiyligi (masalan \"3 oy\", \"1 soat\") faylda aytilgan bo'lsa shu, aks holda bo'sh qatr.\n"
         "- \"location\" — manzil/joylashuv faylda aytilgan bo'lsa shu, aks holda bo'sh qatr.\n"
+        "- \"full_text\" — fayldagi BARCHA matnni asl ketma-ketligi, qator "
+        "bo'linishlari va emojilari bilan AYNAN ko'chir. Bu — qisqartma yoki "
+        "xulosa EMAS: mijozga keyinchalik aynan shu matn ko'rsatiladi, "
+        "shuning uchun hech narsani tashlab ketma, qayta yozma va o'zingdan "
+        "hech narsa qo'shma. Matn umuman bo'lmasa (masalan faqat rasm), "
+        "bo'sh qator qaytar.\n"
         "- \"custom_fields\" — yuqoridagilarga sig'magan, lekin faylda aniq aytilgan boshqa foydali ma'lumotlar "
         "(masalan o'qituvchi ismi, dars jadvali, format, sertifikat) — har biri qisqa o'zbekcha nom bilan, "
         "ko'pi bilan 5 ta juftlik. Faylda yo'q narsani o'zing to'qib chiqarma.\n"
@@ -257,6 +263,12 @@ def analyze_product_file(
     # bilan). Matn uchun esa umuman "blob" kerak emas — to'g'ridan-to'g'ri
     # promptga qo'shiladi, bu ham tezroq va ishonchliroq.
     uploaded_file = None  # faqat PDF yo'lida ishlatiladi, javobdan keyin tozalanadi
+    # ⚠️ Matnli fayllar uchun to'liq matn AI'dan EMAS, to'g'ridan-to'g'ri
+    # fayldan olinadi (pastda natijaga yoziladi) — AI uni qayta terib
+    # chiqishiga yo'l qo'ymaymiz: matn mijozga AYNAN shu holatda
+    # ko'rsatiladi, shuning uchun 100% asl bo'lishi SHART (va bu token
+    # ham tejaydi).
+    raw_file_text = ""
 
     if mime_type.startswith("image/"):
         from PIL import Image
@@ -268,6 +280,7 @@ def analyze_product_file(
             file_text = file_bytes.decode("utf-8", errors="ignore")
         except Exception:
             file_text = ""
+        raw_file_text = file_text.strip()
         contents = [f"{prompt}\n\nFayl matni:\n{file_text}"]
     else:
         # application/pdf — Gemini File API orqali yuklanadi (SDK'ning
@@ -309,5 +322,10 @@ def analyze_product_file(
 
     if not isinstance(data, dict):
         raise ValueError("AI javobi JSON obyekt emas")
+
+    # Matnli fayl bo'lsa — AI terib bergan "full_text" o'rniga faylning
+    # O'ZIDAN o'qilgan asl matnni qo'yamiz (yuqoridagi izohga qarang).
+    if raw_file_text:
+        data["full_text"] = raw_file_text
 
     return data

@@ -800,12 +800,18 @@ def process_incoming_message(
                 if not public_url:
                     logger.error("PUBLIC_URL sozlanmagan! Operator xabarnomasi TWA havolasisiz yuboriladi.")
                 twa_url = f"{public_url}/app/" if public_url else ""
+                # ⚠️ Mijoz nazorat qiladigan qiymatlar (ismi va ayniqsa
+                # XABAR MATNINING O'ZI) HTML xabarga qo'yilmoqda —
+                # escape qilinmasa, mijoz xabariga "<b>" kabi teg yozib,
+                # egaga boradigan ogohlantirishni buzishi yoki butun
+                # xabarni Telegram rad etishiga sabab bo'lishi mumkin.
+                from apps.chat.senders import escape_html as _esc
                 owner_alert = (
                     f"🚨 <b>OPERATOR ARALASHUVI KERAK!</b>\n\n"
-                    f"🏪 Do'kon: <b>{store.name}</b>\n"
-                    f"👤 Mijoz: <b>{customer.full_name or customer.username or customer.platform_user_id}</b>\n"
-                    f"📲 Platforma: <b>{platform.upper()}</b>\n"
-                    f"💬 Xabar: <i>\"{text}\"</i>\n\n"
+                    f"🏪 Do'kon: <b>{_esc(store.name)}</b>\n"
+                    f"👤 Mijoz: <b>{_esc(customer.full_name or customer.username or customer.platform_user_id)}</b>\n"
+                    f"📲 Platforma: <b>{_esc(platform.upper())}</b>\n"
+                    f"💬 Xabar: <i>\"{_esc(text)}\"</i>\n\n"
                     f"<i>AI bot vaqtincha to'xtatildi. Operator javob berishi kutilmoqda.</i>"
                 )
                 reply_markup = None
@@ -863,53 +869,19 @@ def process_incoming_message(
             )
             return
 
-        # ── 4.8. Mijoz allaqachon lid bo'lib bo'lgan bo'lsa — AI'ni
-        # qayta chaqirmasdan, oddiy "operatorlarimiz bog'lanadi" javobi ──
-        # ⚠️ BUG FIX: avval bu tekshiruv yo'q edi — mijoz ism/telefon
-        # berib ro'yxatdan o'tgandan KEYIN yana biror savol bersa (masalan
-        # guruhda yozib, keyin shaxsiy chatga o'tib "narxi qancha" desa),
-        # AI suhbat tarixida ism/telefon hali ham borligi sabab har safar
-        # QAYTA lid JSON blokini chiqarib yuborardi — jonli holatda bitta
-        # mijoz uchun 2 emas 3 ta "YANGI LID!" xabarnomasi kelib, do'kon
-        # egasini chalg'itgan edi (foydalanuvchi aynan shu holatni
-        # ta'kidladi). Endi shu mijoz uchun so'nggi 24 soat ichida
-        # allaqachon lid mavjud bo'lsa, AI umuman chaqirilmaydi — bu ham
-        # takroriy sotuv taklifining oldini oladi, ham AI so'roviga sarf
-        # bo'ladigan xarajatni tejaydi.
-        from apps.orders.models import Lead as _LeadModel
-        from django.utils import timezone as _timezone
-        from datetime import timedelta as _timedelta
-
-        _ALREADY_LEAD_COOLDOWN_HOURS = 24
-        # ⚠️ Guruhda — faqat botga ANIQ qaratilgan (@mention/reply)
-        # xabarlarda ishlaydi, oddiy (botga qaratilmagan) gapga aralashib
-        # "operatorlarimiz bog'lanadi" deb yozib, suhbatni bezovta
-        # qilmasligi uchun. Shaxsiy chatda esa doim ishlaydi.
-        should_check_already_lead = (not is_group) or _is_message_addressed_to_bot(raw_payload, store)
-        existing_recent_lead = should_check_already_lead and _LeadModel.objects.filter(
-            store=store, customer=customer, is_deleted=False,
-            created_at__gte=_timezone.now() - _timedelta(hours=_ALREADY_LEAD_COOLDOWN_HOURS),
-        ).exists()
-        if existing_recent_lead:
-            logger.info(
-                f"[Task] Mijoz allaqachon so'nggi {_ALREADY_LEAD_COOLDOWN_HOURS} soat ichida lid "
-                f"bo'lgan — AI chaqirilmadi | store={store.name} | customer={customer.id}"
-            )
-            # ⚠️ Bu xabar mijoz ro'yxatdan o'tgandan keyin YUBORGAN har
-            # qanday xabarga (hatto shunchaki "rahmat" desa ham) darhol
-            # qaytariladi — shuning uchun ohangi "kechirim so'rayotgandek"
-            # emas, iliq/tabiiy bo'lishi kerak (foydalanuvchi jonli
-            # tekshirib, avvalgi matn juda "quruq" tuyulganini aniqladi).
-            _send_command_reply(
-                store, customer, platform, chat_id,
-                text="Siz allaqachon ro'yxatdan o'tdingiz 😊 Iltimos, kutib turing — sizga tez orada bog'lanamiz!",
-                is_group_message=is_group,
-                reply_to_message_id=message_id if is_group else None,
-            )
-            ChatMessage.objects.filter(id=chat_message.id).update(
-                processing_status=ChatMessage.ProcessingStatus.COMPLETED
-            )
-            return
+        # ── 4.8. Mijoz allaqachon lid bo'lib bo'lgan bo'lsa ─────────────
+        # TARIX: avval bu yerda AI'ni UMUMAN chaqirmay, qattiq yozilgan
+        # ("Siz allaqachon ro'yxatdan o'tdingiz...") matnni yuboruvchi 24
+        # soatlik bypass bor edi — chunki AI suhbat tarixida ism/telefon
+        # borligi sabab har safar QAYTA lid JSON chiqarib yuborib, bitta
+        # mijoz uchun bir nechta "YANGI LID!" xabarnomasi yuborilardi.
+        # Foydalanuvchi keyinroq buni ANIQ rad etdi: lid olingandan keyin
+        # ham AI FAOL qolishi, tabiiy/qisqa javob berishi va bekorchi
+        # xabarlarga jim qolishi (ai_service.py'dagi "11-qoida") kerak.
+        # Qayta-qayta lid JSON/bildirishnoma muammosi endi promptning
+        # o'zida (CATEGORY_PROMPTS'dagi "BUNI FAQAT BIR MARTA" sharti va
+        # 11-qoida) hal qilinadi, shuning uchun bu bypass OLIB TASHLANDI —
+        # AI endi har doim chaqiriladi.
 
         # ── 4.85. Follow-up eslatmasidan keyingi javobni tekshirish ────
         # (faqat shaxsiy chatdagi HAQIQIY mijozlar uchun — egasi/xodim
@@ -1210,9 +1182,17 @@ def process_incoming_message(
             # Endi tekshiruv OLDIN: muvaffaqiyatsiz bo'lsa, mijozga AI matni
             # O'RNIGA to'g'ridan-to'g'ri tuzatish matni yuboriladi (ikki
             # ketma-ket xabar emas, darhol to'g'ri bitta xabar).
+            # ⚠️ Bu matn ikki holatda ishlatiladi: (1) kontakt ma'lumoti
+            # yaroqsiz (masalan telefon raqami juda qisqa yoki ichida
+            # harf bor — lead_service.py'dagi deterministik tekshiruv),
+            # (2) texnik sabab bilan lid saqlanmadi. Shuning uchun matn
+            # aybni mijozga ham, tizimga ham yuklamaydi, lekin ANIQ
+            # nimani qayta yuborish kerakligini aytadi — suhbat davom
+            # etaveradi, mijoz raqamini tuzatib qayta yuborishi mumkin.
             _LEAD_FAILURE_TEXT = (
-                "Kechirasiz, ma'lumotlaringizni saqlashda texnik nosozlik yuz berdi 🙏 "
-                "Iltimos, ismingiz va telefon raqamingizni yana bir bor yuboring."
+                "Ma'lumotlaringizni qabul qila olmadim 🙏 Iltimos, "
+                "<b>ism-familiyangiz va telefon raqamingizni</b> qayta yuboring "
+                "(telefon raqami +998 90 123 45 67 ko'rinishida bo'lsin)."
             )
             final_text = ai_response.text
             lead = None
@@ -1382,9 +1362,29 @@ def process_incoming_message(
             # beriladi, shu narsalarni ikkinchi marta so'ramasligi uchun.
             state = ai_response.conversation_state
             if state:
+                # ⚠️ "registered" bosqichi FAQAT bazada haqiqiy Lead
+                # yaratilgan bo'lsa qo'yiladi. Avval bu AI'ning o'z
+                # da'vosiga (`has_lead`) tayanardi — natijada kontakt
+                # YAROQSIZ bo'lib lid saqlanmagan taqdirda ham mijoz
+                # "ro'yxatdan o'tgan" deb belgilanardi. Keyingi xabarida
+                # esa 11-qoida ("lid olingandan keyin suhbatni davom
+                # ettirmang") ishga tushib, bot undan telefon raqamini
+                # QAYTA so'ramay qo'yardi — mijoz "o'lik holat"da qolib,
+                # lid butunlay yo'qolardi.
+                _lead_persisted = bool(lead or fallback_lead)
                 state_update_fields = {}
-                if state.get("stage"):
-                    state_update_fields["conversation_stage"] = state["stage"]
+                claimed_stage = state.get("stage")
+                if claimed_stage:
+                    if (
+                        claimed_stage == Customer.ConversationStage.REGISTERED
+                        and not _lead_persisted
+                    ):
+                        logger.warning(
+                            f"[Task] AI 'registered' dedi, lekin lid saqlanmagan — "
+                            f"bosqich o'zgartirilmadi | store={store.name} | customer={customer.id}"
+                        )
+                    else:
+                        state_update_fields["conversation_stage"] = claimed_stage
                 if state.get("lead_score") is not None:
                     state_update_fields["lead_score"] = state["lead_score"]
                 if state.get("memory"):
@@ -1392,11 +1392,10 @@ def process_incoming_message(
                         **(customer.conversation_memory or {}), **state["memory"],
                     }
 
-                # ⚠️ Lid shu javobda haqiqatan yaratilgan bo'lsa, bosqichni
-                # majburan "registered"ga o'tkazamiz — AI chiqishining
-                # o'zi bunga ishonib qolish xavfli (LLM ba'zan izchil
-                # bo'lmasligi mumkin), shu yerda DETERMINISTIK backstop.
-                if ai_response.has_lead and ai_response.lead_data:
+                # Lid HAQIQATAN bazaga yozilgan bo'lsa — bosqichni
+                # majburan "registered" qilamiz (AI buni aytishni
+                # unutgan bo'lsa ham). Bu — deterministik backstop.
+                if _lead_persisted:
                     state_update_fields["conversation_stage"] = Customer.ConversationStage.REGISTERED
 
                 if state_update_fields:
@@ -1419,7 +1418,10 @@ def process_incoming_message(
                         handoff_cooldown_key = f"handoff_alert_sent:{store.id}:{customer.id}"
                         if cache.add(handoff_cooldown_key, True, timeout=60 * 60 * 24):
                             from apps.chat.senders import send_telegram_message as _send_handoff_alert
-                            customer_label = customer.full_name or customer.username or f"Mijoz #{customer.platform_user_id}"
+                            from apps.chat.senders import escape_html as _esc_handoff
+                            customer_label = _esc_handoff(
+                                customer.full_name or customer.username or f"Mijoz #{customer.platform_user_id}"
+                            )
                             _send_handoff_alert(
                                 bot_token=store.tg_bot_token,
                                 chat_id=store.tg_owner_chat_id,

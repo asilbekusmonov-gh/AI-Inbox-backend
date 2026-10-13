@@ -346,6 +346,30 @@ if PUBLIC_URL:
     CSRF_TRUSTED_ORIGINS = [PUBLIC_URL, "https://*.ngrok-free.dev", "https://*.ngrok-free.app"]
 
 
+# ─────────────────────────────────────────────
+# HTTPS / SSL (production — haqiqiy domen + sertifikat sozlangandan keyin)
+# ─────────────────────────────────────────────
+# ⚠️ nginx SSL'ni tugatib, Django'ga oddiy HTTP orqali uzatadi (reverse
+# proxy) — shuning uchun Django so'rov HAQIQATDA HTTPS orqali kelganini
+# faqat shu header orqali bilishi mumkin (nginx.conf'da allaqachon
+# "X-Forwarded-Proto" yuboriladi). Bu header bo'lmasa, SECURE_SSL_REDIRECT
+# cheksiz tsikl (redirect loop) yaratib yuborishi mumkin edi.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# ⚠️ Domen+SSL hali sozlanmagan bo'lsa (masalan hozirgi Cloudflare Quick
+# Tunnel yoki SSL o'rnatilmagan yangi server bosqichida), buni DEBUG=False
+# bo'lsa ham .env'da False qoldiring — aks holda HTTP orqali kirish
+# butunlay ishlamay qoladi. SSL (certbot) sozlangach, .env'da
+# SECURE_SSL_REDIRECT=True qiling va konteynerlarni qayta ishga tushiring.
+_SECURE_SSL_REDIRECT = env("SECURE_SSL_REDIRECT", default="False").lower() == "true"
+SECURE_SSL_REDIRECT = _SECURE_SSL_REDIRECT
+SESSION_COOKIE_SECURE = _SECURE_SSL_REDIRECT
+CSRF_COOKIE_SECURE = _SECURE_SSL_REDIRECT
+SECURE_HSTS_SECONDS = int(env("SECURE_HSTS_SECONDS", default="0"))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_HSTS_SECONDS > 0
+SECURE_HSTS_PRELOAD = SECURE_HSTS_SECONDS > 0
+
+
 
 # ─────────────────────────────────────────────
 # META / INSTAGRAM

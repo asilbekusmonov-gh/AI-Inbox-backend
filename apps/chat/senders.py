@@ -6,7 +6,9 @@ Har bir sender:
 - Tarmoq uzilishida retry qiladi
 - Uzoq xabarlarni bo'lib yuboradi
 """
+import html
 import logging
+import re
 import time
 from datetime import timedelta
 from typing import Optional
@@ -15,6 +17,74 @@ import httpx
 from django.utils import timezone
 
 logger = logging.getLogger("apps.chat")
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html_markup(text: str) -> str:
+    """
+    HTML teglarini olib tashlab, o'qilishi mumkin bo'lgan toza matn qaytaradi.
+
+    ⚠️ Jonli holatda aniqlangan xato: Telegram `parse_mode=HTML` bilan
+    yuborilgan xabarni rad etsa (400 — masalan yopilmagan teg yoki
+    qo'llab-quvvatlanmaydigan teg), zaxira yo'l AYNAN O'SHA matnni
+    parse_mode'siz qayta yuborardi. Natijada mijoz
+    "<b>ism-familiyangiz</b>" ko'rinishidagi teglarni SO'ZMA-SO'Z
+    ko'rardi. Endi zaxira yo'lda teglar olib tashlanadi va HTML
+    belgilari (&amp; kabi) oddiy belgilarga qaytariladi.
+    """
+    without_tags = _HTML_TAG_RE.sub("", text or "")
+    return html.unescape(without_tags)
+
+
+# Telegram `parse_mode=HTML` rasman qo'llab-quvvatlaydigan teglar.
+# Boshqa har qanday "<...>" ko'rinishdagi matn oddiy matn sifatida
+# escape qilinadi (Telegram ularni xato deb hisoblab, butun xabarni
+# rad etmasligi uchun).
+_TELEGRAM_ALLOWED_TAG_RE = re.compile(
+    r"</?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|tg-spoiler|blockquote)>"
+    r"|<a\s+href=(?:\"[^\"]*\"|'[^']*')\s*>"
+    r"|</a>",
+    re.IGNORECASE,
+)
+
+
+def sanitize_telegram_html(text: str) -> str:
+    """
+    HTML rejimida yuboriladigan matnni Telegram parseri uchun xavfsiz
+    qiladi: ruxsat etilgan teglarni SAQLAYDI, qolgan "&", "<", ">"
+    belgilarini escape qiladi.
+
+    ⚠️ Ikki marta escape qilinmaydi: teg bo'lmagan qismlar avval
+    unescape qilinib, keyin escape qilinadi — shuning uchun matnda
+    allaqachon "&amp;" bo'lsa, u "&amp;amp;" bo'lib ketmaydi
+    (funksiya idempotent).
+    """
+    if not text:
+        return text
+
+    parts = []
+    last_end = 0
+    for match in _TELEGRAM_ALLOWED_TAG_RE.finditer(text):
+        parts.append(html.escape(html.unescape(text[last_end:match.start()]), quote=False))
+        parts.append(match.group(0))
+        last_end = match.end()
+    parts.append(html.escape(html.unescape(text[last_end:]), quote=False))
+    return "".join(parts)
+
+
+def escape_html(value) -> str:
+    """
+    Mijoz/foydalanuvchi kiritgan qiymatni HTML xabariga qo'yishdan oldin
+    xavfsizlantiradi.
+
+    ⚠️ Nega kerak: do'kon egasiga yuboriladigan "YANGI LEAD" xabari
+    `parse_mode=HTML` bilan ketadi va ichiga mijozning ismi/username'i
+    kabi ISHONCHSIZ qiymatlar qo'yiladi. Agar mijozning ismida "<" yoki
+    "&" bo'lsa (yoki u ataylab "<b>" kabi teg yozsa), Telegram butun
+    xabarni rad etadi yoki egaga soxta formatlangan matn ko'rsatadi.
+    """
+    return html.escape(str(value or ""), quote=False)
 
 # Telegram matn uzunlik chegarasi
 TELEGRAM_MAX_LENGTH = 4096
@@ -52,6 +122,16 @@ def send_telegram_message(
             f"chat_id={chat_id!r} | text={'yes' if text else 'NO'}"
         )
         return False
+
+    # ⚠️ HTML rejimida yuborilayotgan matnni xavfsizlantiramiz: qo'llab-
+    # quvvatlanadigan teglar (<b>, <i>, <a href>, <code> ...) saqlanadi,
+    # qolgan "&", "<", ">" belgilari esa escape qilinadi. Sababi (jonli
+    # holatda aniqlangan): katalogdagi nom ichida "&" bo'lsa (masalan
+    # "Java Backend & Spring Boot"), Telegram butun xabarni 400 bilan
+    # rad etardi va zaxira yo'l xom matnni yuborib, mijozga "<b>" teglari
+    # SO'ZMA-SO'Z ko'rinardi.
+    if parse_mode and parse_mode.upper() == "HTML":
+        text = sanitize_telegram_html(text)
 
     # Uzoq xabarlarni bo'lib yuboramiz
     chunks = _split_text(text, TELEGRAM_MAX_LENGTH)
@@ -137,8 +217,14 @@ def _send_telegram_chunk(
                 continue
 
             if response.status_code == 400 and "parse_mode" in payload:
-                logger.warning("Telegram parse xatosi! Matnni parse_mode'siz qayta yuboramiz.")
+                # ⚠️ Teglarni OLIB TASHLAB yuboramiz — aks holda mijoz
+                # "<b>...</b>" teglarini so'zma-so'z ko'radi.
+                logger.warning(
+                    "Telegram parse xatosi! Matn teglardan tozalanib, "
+                    "parse_mode'siz qayta yuboriladi."
+                )
                 payload.pop("parse_mode", None)
+                payload["text"] = _strip_html_markup(payload["text"])
                 continue
 
             logger.error(
@@ -338,8 +424,13 @@ def _format_lead_notification(lead) -> str:
     }
     status_text = status_labels.get(lead.lead_status, lead.lead_status)
 
+    # ⚠️ Mijoz nazorat qiladigan BARCHA qiymatlar (ism, username, kurs
+    # nomi) HTML xabariga qo'yilishdan oldin escape qilinadi — aks holda
+    # ismida "<" yoki "&" bo'lgan mijoz tufayli Telegram butun
+    # xabarnomani rad etadi (egasi lid haqida bexabar qoladi), yoki
+    # ataylab teg yozgan mijoz egasining xabarini buzib ko'rsatadi.
     course_text = (
-        f"📚 <b>Qiziqqan:</b> {lead.interested_course.name}\n"
+        f"📚 <b>Qiziqqan:</b> {escape_html(lead.interested_course.name)}\n"
         if lead.interested_course else ""
     )
 
@@ -348,15 +439,15 @@ def _format_lead_notification(lead) -> str:
     username_text = ""
     customer = getattr(lead, "customer", None)
     if customer and getattr(customer, "username", None):
-        username_text = f"🔗 <b>Telegram:</b> @{customer.username}\n"
+        username_text = f"🔗 <b>Telegram:</b> @{escape_html(customer.username)}\n"
 
     return (
         f"🆕 <b>YANGI LEAD!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📋 <b>Raqam:</b> {lead.lead_number}\n"
-        f"👤 <b>Ism:</b> {lead.customer_full_name}\n"
+        f"📋 <b>Raqam:</b> {escape_html(lead.lead_number)}\n"
+        f"👤 <b>Ism:</b> {escape_html(lead.customer_full_name)}\n"
         f"{username_text}"
-        f"📞 <b>Tel:</b> {lead.customer_phone}\n"
+        f"📞 <b>Tel:</b> {escape_html(lead.customer_phone)}\n"
         f"{course_text}"
         f"🌡 <b>Holat:</b> {status_text}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
