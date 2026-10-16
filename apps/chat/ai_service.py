@@ -135,6 +135,9 @@ Sizning vazifangiz "savolga javob berib, ro'yxatdan o'tish havolasini yuborish" 
    Yaxshi: "Zo'r. Buni asosan ishga kirish uchun o'rganmoqchimisiz yoki boshqa maqsadingiz bormi?"
 1a. (⚠️ FAQAT SHAXSIY CHAT UCHUN — GURUHDA BUNI EMAS, PASTDAGI GURUH QOIDASINING (c) QISMINI QO'LLANG: guruhda narx/muddat/jadval kabi ANIQ savolga ham ASLO aniq raqam bermang, qisqa tasdiq + shaxsiy chatga havola bering) ⚠️⚠️ ENG MUHIM QOIDA (2026-10-06'da ANIQ belgilangan, hammasidan USTUN) — ANIQ SAVOLGA HAM AVVAL TO'G'RIDAN-TO'G'RI JAVOB BERMANG, AVVAL KONTAKT TAKLIF QILING: mijoz narx/muddat/jadval/mavjudlik kabi ANIQ, yopiq savol bersa ham — agar siz hali uning ism-familiya va telefon raqamini bilmasangiz — javobning o'zini (raqam/aniq faktni) DARHOL bermang. Buning o'rniga qisqa, iliq tarzda mutaxassis bilan bog'lanishni taklif qiling va ism-familiya hamda telefon raqamini so'rang: "Bu haqida mutaxassislarimiz siz bilan tez orada bog'lanishadi. Iltimos, <b>ism-familiyangiz va telefon raqamingizni</b> qoldira olasizmi?" kabi. ⚠️ Savolning borlig'ini/mavjudligini TASDIQLASH (masalan "Ha, bizda bu kurs bor") kerak bo'lsa aytish mumkin — bu javob EMAS, faqat taklifni tabiiy qilish uchun zarur kontekst — LEKIN ANIQ RAQAM/FAKT (narx, muddat, sana, soat) BERMANG.
    ⚠️ MUHIM — FORMATLASH: "ism-familiyangiz va telefon raqamingiz" (yoki shunga teng iborani) so'rayotganda, bu iborani HAR DOIM HTML qalin teg bilan <b>...</b> belgilang (masalan "Iltimos, <b>ism-familiyangiz va telefon raqamingizni</b> qoldira olasizmi?") — bu mijozga ko'zga tashlanib turishi uchun MUHIM, matnni tasodifiy yozib o'tmang.
+   ⚠️⚠️ MUHIM — SAVOLNI TAKRORLASH RAD JAVOBI EMAS (real aniqlangan xato, 2026-10-17): siz kontakt taklif qilganingizdan keyin mijoz xuddi shu savolni qayta bersa ("narxi qancha? qancha vaqt davom etadi") yoki yangi savol qo'shsa — bu RAD JAVOBI EMAS, u shunchaki savolini takrorlayapti. Bunday holatda narx/muddatni AYTMANG — muloyimlik bilan yana kontakt taklif qiling. Rad javobi deb hisoblash uchun mijoz ANIQ, so'zma-so'z qarshilik bildirishi SHART ("yo'q", "shu yerda ayting", "kontakt bermayman" kabi).
+   NOTO'G'RI (real aniqlangan xato, 2026-10-17): Siz: "...ism-familiyangiz va telefon raqamingizni qoldira olasizmi?" → Mijoz: "narxi qancha? qancha vaqt davom etadi" → Siz: "Python kursimiz narxi oyiga 1 800 000 so'm, davomiyligi esa 3 oy." (mijoz RAD ETMAGAN — shunchaki savolini takrorlagan, lekin narx ham, muddat ham aytib yuborilgan)
+   TO'G'RI: Siz: "...telefon raqamingizni qoldira olasizmi?" → Mijoz: "narxi qancha? qancha vaqt davom etadi" → Siz: "Bu savollaringizga mutaxassislarimiz to'liq javob berishadi — iltimos, <b>ism-familiyangiz va telefon raqamingizni</b> qoldiring."
    ⚠️ MUHIM — "СРАЗУ"/"TEZ"/"TO'G'RIDAN-TO'G'RI" KABI SO'ZLAR RAD JAVOBI EMAS: mijoz birinchi savolidayoq "сразу", "tezroq", "to'g'ridan-to'g'ri ayting" kabi so'z qo'shsa ham (masalan "Narxini ayting, сразу"), bu ANIQ RAD JAVOBI hisoblanmaydi — bu faqat mijozning so'zlashuv uslubi. RAD JAVOBI deb hisoblash uchun mijoz AVVAL kontakt taklifini ko'rishi, SO'NG uni ANIQ rad etishi SHART (masalan "yo'q, menga narxi kerak" — lekin bu faqat kontakt TAKLIF QILINGANDAN KEYIN aytilsa). Kontakt taklif qilinmasdan turib "сразу"/"tez" so'ziga asoslanib to'g'ridan-to'g'ri javob berish — QATTIQ TAQIQLANGAN xato.
    ⚠️ MUHIM — BITTA (NOTO'G'RI) TO'G'RIDAN-TO'G'RI JAVOB KEYINGI SAVOLLARGA HAM "YO'L OCHIB BERMAYDI": agar biror sababga ko'ra bitta savolga (noto'g'ri) to'g'ridan-to'g'ri javob bergan bo'lsangiz ham, bu ROSTDAN HAM rad javobi OLINGANI degani EMAS — keyingi YANGI savolga яна avval kontakt taklif qilishingiz kerak. "Rad etilgandan keyin davom etish" qoidasi FAQAT mijoz chindan ham ANIQ, so'zma-so'z rad javobini berganda ishlaydi, sizning o'z xatoyingiz bu huquqni bermaydi.
    FAQAT agar mijoz buni ANIQ rad etsa — ya'ni kontakt berishni istamasligini aniq bildirib, javobni to'g'ridan-to'g'ri talab qilsa (masalan "yo'q, menga narxi kerak", "kontakt kerak emas, shunchaki ayting", "avval narxini ayting" kabi) — O'SHANDAGINA so'ralgan savolga TO'LIQ, to'g'ridan-to'g'ri javob bering. Bir marta ANIQ rad javobini olgandan so'ng, shu suhbatning QOLGAN qismida boshqa savollariga ham to'g'ridan-to'g'ri javob berishda davom eting — qayta-qayta har safar kontakt taklif qilib bezovta QILMANG (bu — pastdagi "kontakt so'rashni zerikarli qilmang" qoidasiga mos keladi; mijoz bir marta aniq pozitsiyasini bildirgandan keyin buni hurmat qiling).
@@ -149,6 +152,9 @@ Sizning vazifangiz "savolga javob berib, ro'yxatdan o'tish havolasini yuborish" 
    Tizim buni ko'rib, mijozga kurs haqidagi to'liq ma'lumotni (narx, davomiylik, jadval, dastur — hammasi) o'zi yuboradi va oxirida kontakt so'raydi. Nomni katalogda YOZILGANDEK, o'zgartirmasdan ko'chiring.
    ⚠️⚠️⚠️ SEND_FULL_INFO QACHON ISHLATILMAYDI — BU ENG KO'P UCHRAYDIGAN XATO (2026-10-13'da jonli aniqlangan): mijoz BIRINCHI marta savol berganda (masalan birinchi xabari "narxi qancha?" bo'lsa) SEND_FULL_INFO'ni ASLO ishlatmang — bu paytda hali hech qanday rad javobi BO'LISHI MUMKIN EMAS, chunki siz hali kontakt taklif qilmagansiz. Shart QAT'IY va ikki bosqichli: (1) SIZ avval kontakt (ism+telefon) taklif qilgan bo'lishingiz SHART, (2) mijoz SHUNDAN KEYIN uni so'zma-so'z rad etgan bo'lishi SHART ("yo'q, shu yerda ayting", "kontakt bermayman, shunchaki ayting" kabi). Ikkalasi ham bajarilmaguncha — oddiy tartib amal qiladi: avval kontakt taklif qiling.
    ⚠️ Bu qoida BARCHA savol turlariga bir xil qo'llanadi — narx, davomiylik, jadval, boshlanish sanasi, dastur mazmuni, chegirma: qaysi biri so'ralishidan qat'i nazar, birinchi savolga javob HAR DOIM kontakt taklifi bo'ladi.
+   ⚠️⚠️ TO'LIQ MA'LUMOT YUBORILGANDAN KEYIN — ENDI SIZ O'QITUVCHI EMASSIZ (real aniqlangan xato, 2026-10-17): mijozga kursning to'liq matni yuborilgandan keyin u kurs mazmuniga oid savol bersa (masalan "ikki o'lchamli massivlar nima?", "Django nima?", "qiyinmi?") — bu savolga DARS BERGANDEK tushuntirib javob BERMANG. Sizning vazifangiz o'qitish emas, kontakt yig'ish. Buning o'rniga mijozni yumshoq, mantiqiy tarzda kontakt qoldirishga yo'naltiring: shunday savollarga to'liq javobni MUTAXASSIS beradi.
+   NOTO'G'RI (real aniqlangan xato): Mijoz: "ikki o'lchamli massivlar nimayu" → Siz: "Ikki o'lchamli massiv — bu ma'lumotlarni jadval shaklida saqlash usulidir..." (bot o'qituvchiga aylanib ketgan)
+   TO'G'RI: Mijoz: "ikki o'lchamli massivlar nimayu" → Siz: "Bu savolingizga mutaxassislarimiz to'liq va batafsil javob berishadi — iltimos, <b>ism-familiyangiz va telefon raqamingizni</b> qoldiring."
    NOTO'G'RI (real aniqlangan xato, 2026-10-13): Mijoz (birinchi xabari): "narxi qancha" → Siz: "SEND_FULL_INFO: Foundation" (hali kontakt taklif qilinmagan, rad javobi yo'q — to'liq ma'lumot yuborib yuborilgan)
    TO'G'RI: Mijoz (birinchi xabari): "narxi qancha" → Siz: "Bu haqida mutaxassislarimiz siz bilan tez orada bog'lanishadi. Iltimos, <b>ism-familiyangiz va telefon raqamingizni</b> qoldira olasizmi?" → Mijoz: "yo'q, shu yerda ayting" → Siz: "SEND_FULL_INFO: Foundation"
    ⚠️ MUHIM — RAD ETILGANDAN KEYINGI JAVOB HAM QISQA BO'LSIN, QO'SHIMCHA FAKT QO'SHMANG, VA HECH QACHON FAKT O'YLAB TOPMANG (bu qoida kursda "TO'LIQ MA'LUMOT: bor" belgisi BO'LMAGAN holatga tegishli): mijoz rad etib, FAQAT narxni so'ragan bo'lsa, javobingizga jadval/dars davomiyligi/sinov darsi/o'qituvchi kabi SO'RALMAGAN qo'shimcha faktlarni o'zingizdan qo'shib YUBORMANG — faqat so'ralgan BITTA faktni bering, boshqa hech narsa qo'shmang. ⚠️ Rad etilgandan keyin "nega narxi qimmat" kabi savolga ham — pastdagi 2-xavfsizlik qoidasi (UNIVERSAL FAKT QOIDASI) BU YERDA HAM to'liq amal qiladi: katalog/"Ishonchli Biznes Ma'lumotlari"da TASDIQLANMAGAN hech qanday foiz, guruh hajmi, "birinchi dars bepul" kabi marketing da'volarini O'YLAB TOPMANG — rad etilgan bo'lsa ham bu qoidadan ozod emassiz.
@@ -372,6 +378,164 @@ _GROUP_LEAK_PATTERNS = (
 )
 
 
+# To'liq skript yuborilganini aniqlash uchun belgi — skript oxiriga
+# har doim `_FULL_INFO_CONTACT_TAIL` qo'shiladi, shuning uchun uning
+# boshlanishi ishonchli "marker" bo'lib xizmat qiladi.
+_FULL_INFO_SENT_MARKER = "boshqa savolingiz bo'lsa yoki ro'yxatdan o'tmoqchi bo'lsangiz"
+
+# Skript yuborilgandan keyin mijoz kurs haqida yana savol bersa —
+# javob o'rniga shu matn yuboriladi.
+_AFTER_SCRIPT_CONTACT_TEXT = (
+    "Bu savolingizga mutaxassislarimiz to'liq va batafsil javob berishadi — "
+    "iltimos, <b>ism-familiyangiz va telefon raqamingizni</b> qoldiring."
+)
+
+
+def _full_info_already_sent(history: list) -> bool:
+    """Suhbatda kursning to'liq skripti allaqachon yuborilganmi?"""
+    for turn in history or []:
+        if turn.get("role") != "model":
+            continue
+        for part in turn.get("parts") or []:
+            text = part.get("text", "") if isinstance(part, dict) else str(part)
+            if _FULL_INFO_SENT_MARKER in text.lower():
+                return True
+    return False
+
+
+def _redirect_to_contact_after_script(text: str, history: list, customer, has_lead: bool) -> str:
+    """
+    To'liq skript allaqachon yuborilgan va kontakt hali olinmagan bo'lsa,
+    mijozning keyingi savollariga javob BERILMAYDI — o'rniga kontakt
+    so'raladi.
+
+    ⚠️ Do'kon egasining talabi (2026-10-17): "kursga tegishli biror narsa
+    so'rasa, mutaxassislarimiz orqali to'liq ma'lumotga ega bo'lasiz
+    deb ism-familiya va raqamni so'rash kerak". Jonli xato: skript
+    yuborilgandan keyin mijoz "ikki o'lchamli massivlar nimayu" deb
+    so'raganda bot uni O'QITUVCHI kabi tushuntirib berdi — holbuki
+    botning vazifasi o'qitish emas, kontakt yig'ish.
+
+    Tegmaydigan holatlar: mijoz kontaktini bergan bo'lsa (lid yaratilgan
+    yoki telefon allaqachon ma'lum), yoki javobda kontakt so'rovi
+    allaqachon bor bo'lsa.
+    """
+    if not text or has_lead:
+        return text
+    if getattr(customer, "phone_number", None):
+        return text
+    if not _full_info_already_sent(history):
+        return text
+    if _CONTACT_ASK_MARKER in text.lower():
+        return text
+    return _AFTER_SCRIPT_CONTACT_TEXT
+
+
+def _resolve_interested_product(store, customer, history: list):
+    """
+    Suhbatdan mijoz qaysi kurs/xizmat bilan qiziqayotganini aniqlaydi.
+
+    Tartib: (1) mijoz xotirasidagi `interested_product`, (2) suhbat
+    tarixida ENG OXIRGI eslatilgan katalog nomi, (3) katalogda to'liq
+    matni bor YAGONA element bo'lsa — o'sha.
+
+    ⚠️ Bu — `SEND_FULL_INFO` belgisiga MUQOBIL, kod darajasidagi yo'l:
+    AI belgini chiqarishni "unutib qo'yganda" ham mijoz rad etgan bo'lsa
+    to'liq matn yuborilishi uchun kerak.
+    """
+    from apps.chat.lead_service import _find_interested_course
+    from apps.products.models import Product
+
+    memory = getattr(customer, "conversation_memory", None) or {}
+    remembered = str(memory.get("interested_product", "") or "").strip()
+    if remembered:
+        product = _find_interested_course(store, remembered)
+        if product:
+            return product
+
+    products = list(
+        Product.objects.filter(store=store, is_deleted=False, is_active=True)
+    )
+    if not products:
+        return None
+
+    # Tarixni OXIRIDAN boshlab ko'rib chiqamiz — eng so'nggi eslatilgan
+    # kurs mijozning hozirgi qiziqishi deb hisoblanadi.
+    for turn in reversed(history or []):
+        parts = turn.get("parts") or []
+        text = " ".join(
+            (p.get("text", "") if isinstance(p, dict) else str(p)) for p in parts
+        ).lower()
+        if not text:
+            continue
+        for product in products:
+            if product.name and product.name.lower() in text:
+                return product
+        # Mijoz nomni qisqartirib yozishi mumkin ("foundation") — katalog
+        # nomining birinchi so'zi bilan ham solishtiramiz.
+        for product in products:
+            first_word = (product.name or "").split()[0].strip(":,.").lower()
+            if len(first_word) >= 4 and first_word in text:
+                return product
+
+    with_full_info = [p for p in products if (p.full_info or "").strip()]
+    if len(with_full_info) == 1:
+        return with_full_info[0]
+    return None
+
+
+def _scrub_private_facts_before_contact(text: str, store, customer) -> str:
+    """
+    SHAXSIY chatda: mijoz hali kontakt bermagan VA uni rad ham etmagan
+    bo'lsa, javobdagi narx/muddat/jadval kabi ANIQ faktlarni aytib
+    yuborishga yo'l qo'ymaydi — javob o'rniga kontakt taklifi qaytariladi.
+
+    ⚠️ Nega kerak (jonli aniqlangan xato, 2026-10-17): bot bir marta
+    kontakt so'ragandan keyin mijoz savolini TAKRORLADI ("narxi qancha?
+    qancha vaqt davom etadi") — rad etmadi. AI buni "qarshilik" deb
+    hisoblab, "Python kursimiz narxi oyiga 1 800 000 so'm, davomiyligi
+    esa 3 oy" deb aytib yubordi. Biznes qoidasi esa qat'iy: BIRINCHI
+    (va takroriy) savolda nima so'ralishidan qat'i nazar javob faqat
+    "mutaxassislarimiz bog'lanadi" bo'lishi kerak.
+
+    Promptda bu qoida allaqachon yozilgan edi — lekin LLM uni buzdi,
+    shuning uchun bu yerda kod darajasidagi so'nggi to'siq.
+
+    ⚠️ Rad javobidan KEYIN ham AI o'zidan narx/muddat YOZMAYDI (jonli
+    aniqlangan xato, 2026-10-17: mijoz "yo'q, narxi ma'lumotlarini shu
+    yerda kerak" deganda bot "Python kursimiz narxi oyiga 1 800 000
+    so'm, davomiyligi esa 3 oy" deb o'zidan qisqa javob yozdi). Do'kon
+    egasining talabi: rad javobidan keyin kursning SAQLANGAN to'liq
+    matni ("script") yuborilishi kerak, AI o'zi tahrirlagan qisqa
+    javob emas. To'liq matn esa bu funksiyaga umuman yetib kelmaydi —
+    u `SEND_FULL_INFO` yo'li orqali, `_call_gemini` ichida ERTAROQ
+    qaytariladi. Demak bu yerga tushgan har qanday "faktli" matn —
+    AI o'zi yozgan javob, va u bloklanadi.
+
+    Oqibat: agar kursda to'liq matn (`Product.full_info`) saqlanmagan
+    bo'lsa, mijoz rad etsa ham script yuborilmaydi — bot kontakt
+    so'rashda davom etadi. Buni hal qilish uchun do'kon egasi o'sha
+    kursga to'liq matn qo'shishi kerak (TWA → kursni tahrirlash →
+    "To'liq ma'lumot").
+    """
+    if not text:
+        return text
+
+    # Kontakt allaqachon olingan bo'lsa, bu to'siq kerak emas.
+    if getattr(customer, "phone_number", None):
+        return text
+
+    if not any(p.search(text) for p in _GROUP_LEAK_PATTERNS):
+        return text
+
+    logger.warning(
+        f"[Shaxsiy chat] Kontakt olinmasdan narx/muddat aytilgan — javob "
+        f"kontakt taklifiga almashtirildi | store={getattr(store, 'name', '?')} | "
+        f"matn={text[:120]!r}"
+    )
+    return _FIRST_ASK_CONTACT_TEXT
+
+
 def _scrub_group_numbers(text: str, store) -> str:
     """
     FAQAT guruh xabarlarida chaqiriladi. Javobni jumlalarga bo'lib, har
@@ -573,10 +737,19 @@ _DECLINE_PATTERNS = (
 )
 
 
-def _customer_declined_contact(history: list) -> bool:
+def _customer_declined_contact(history: list, current_message: str = "") -> bool:
     """
     Mijozning SO'NGGI xabari kontakt berishdan bosh tortish/talab
     qilishmi?
+
+    ⚠️ `current_message` — mijozning AYNI SHU xabari. U MAJBURIY
+    darajada muhim: suhbat tarixi (`history`) bazadan FAQAT allaqachon
+    qayta ishlangan (COMPLETED) xabarlarni yuklaydi, joriy xabar esa
+    hali "processing" holatida bo'lgani uchun tarixda BO'LMAYDI.
+    Jonli aniqlangan xato (2026-10-17): shu sabab mijoz "yoq shu yerda
+    ayta olaszmi" deb rad etganda tizim buni ko'rmasdan yana kontakt
+    so'radi, to'liq skriptni esa faqat KEYINGI xabardan keyin yubordi —
+    ya'ni rad javobi bir xabar KECHIKIB ishlardi.
 
     ⚠️ Nega kerak (jonli aniqlangan xato, 2026-10-13): bot bir marta
     kontakt so'ragandan keyin mijoz shunchaki NAVBATDAGI savolini berdi
@@ -589,15 +762,16 @@ def _customer_declined_contact(history: list) -> bool:
     etadi. Bu — xavfsiz yo'nalishdagi xato: botning asosiy maqsadi
     baribir kontakt olish.
     """
-    last_user_text = ""
-    for turn in reversed(history or []):
-        if turn.get("role") != "user":
-            continue
-        parts = turn.get("parts") or []
-        last_user_text = " ".join(
-            (p.get("text", "") if isinstance(p, dict) else str(p)) for p in parts
-        )
-        break
+    last_user_text = (current_message or "").strip()
+    if not last_user_text:
+        for turn in reversed(history or []):
+            if turn.get("role") != "user":
+                continue
+            parts = turn.get("parts") or []
+            last_user_text = " ".join(
+                (p.get("text", "") if isinstance(p, dict) else str(p)) for p in parts
+            )
+            break
 
     if not last_user_text:
         return False
@@ -607,7 +781,8 @@ def _customer_declined_contact(history: list) -> bool:
 
 
 def _build_full_info_response(
-    response_text: str, store, tokens_used: int, model_name: str, history: list = None,
+    response_text: str, store, tokens_used: int, model_name: str,
+    history: list = None, current_message: str = "",
 ) -> "AIResponse":
     """
     "SEND_FULL_INFO: <kurs nomi>" belgisini mijozga yuboriladigan haqiqiy
@@ -640,7 +815,7 @@ def _build_full_info_response(
             model_used=model_name,
         )
 
-    if not _customer_declined_contact(history):
+    if not _customer_declined_contact(history, current_message):
         logger.warning(
             f"SEND_FULL_INFO rad etildi: mijozning so'nggi xabarida aniq "
             f"rad javobi yo'q | do'kon={store.name}"
@@ -1572,7 +1747,8 @@ def _call_gemini(store, customer, user_message: str, model_name: str = "gemini-3
     # yuboriladi (AI qayta terganda narx/jadvalni buzib yuborishi mumkin).
     if response_text.strip().upper().startswith(SEND_FULL_INFO_SENTINEL):
         return _build_full_info_response(
-            response_text, store, tokens_used, model_name, history=history,
+            response_text, store, tokens_used, model_name,
+            history=history, current_message=user_message,
         )
 
     # Lid ma'lumotlarini tekshirish
@@ -1598,7 +1774,42 @@ def _call_gemini(store, customer, user_message: str, model_name: str = "gemini-3
         clean_text = _scrub_group_course_listing(clean_text, store)
         clean_text = _scrub_group_numbers(clean_text, store)
     else:
+        # ⚠️ DETERMINISTIK YO'L (jonli aniqlangan xato, 2026-10-17):
+        # mijoz "yoq shu yerda ayta olaszmi narxni" deb ANIQ rad etgan
+        # bo'lsa-da, AI `SEND_FULL_INFO` belgisini chiqarmay, oddiy
+        # kontakt taklifini yozib yubordi — natijada mijoz hech qanday
+        # ma'lumot olmay, aylanma suhbatda qolib ketdi. Endi bu o'tish
+        # AI'ning xohishiga bog'liq emas: rad javobi aniqlansa va
+        # kursning saqlangan to'liq matni bo'lsa, kod uni O'ZI yuboradi.
+        if (
+            _customer_declined_contact(history, user_message)
+            and _bot_already_asked_for_contact(history)
+            and not getattr(customer, "phone_number", None)
+        ):
+            product = _resolve_interested_product(store, customer, history)
+            full_info = (getattr(product, "full_info", "") or "").strip() if product else ""
+            if full_info:
+                logger.info(
+                    f"Rad javobi aniqlandi — to'liq ma'lumot kod orqali yuborilmoqda | "
+                    f"do'kon={store.name} | kurs={product.name}"
+                )
+                return AIResponse(
+                    text=f"{full_info}\n\n{_FULL_INFO_CONTACT_TAIL}",
+                    tokens_used=tokens_used,
+                    model_used=model_name,
+                    conversation_state=conversation_state,
+                )
+
         clean_text = _scrub_private_multi_course_price_dump(clean_text, store)
+        # ⚠️ Kontakt olinmagan va rad ham etilmagan bo'lsa — narx/muddat
+        # kabi faktlar umuman chiqmasligi kerak (yuqoridagi funksiya
+        # izohiga qarang).
+        clean_text = _scrub_private_facts_before_contact(clean_text, store, customer)
+        # To'liq skript yuborilgandan keyin — savollarga javob bermay,
+        # kontakt so'rashga qaytaramiz (yuqoridagi funksiya izohiga qarang).
+        clean_text = _redirect_to_contact_after_script(
+            clean_text, history, customer, has_lead=lead_data is not None,
+        )
 
     logger.info(
         f"Gemini javob olindi | model={model_name} | "
