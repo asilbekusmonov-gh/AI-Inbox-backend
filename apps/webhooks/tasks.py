@@ -36,6 +36,43 @@ logger = logging.getLogger("apps.webhooks")
 # qolib ketish yomonroq.
 GROUP_REPLY_COOLDOWN_SECONDS = 20
 
+# ⚠️ Jonli aniqlangan xato (2026-10-18): avval bu ro'yxatda
+# shunchaki "operator" so'zi bor edi va u MATN ICHIDAN qidirilardi.
+# Natijada dasturlash markazining mijozi "asosiy operator, ikki
+# o'lchamli massivlar nimayu?" deb KURS MAVZUSI haqida so'raganda
+# (kurs dasturida aynan "Asosiy operatorlar" mavzusi bor!), tizim
+# buni "jonli operator chaqiryapti" deb tushunib, AI'ni butunlay
+# o'chirib qo'ydi — mijoz javobsiz qoldi.
+#
+# Endi faqat ANIQ NIYAT bildiruvchi IBORALAR qidiriladi: yolg'iz
+# "operator" so'zi yetarli emas, u bilan birga "bilan/chaqir/ulang"
+# kabi harakat so'zi bo'lishi kerak.
+HANDOFF_PATTERNS = (
+    # "operator bilan", "operatorni chaqiring", "operator kerak"
+    r"\boperator\w*\s+(bilan|chaqir\w*|ulan\w*|kerak|bormi|bera|yoz|javob|bog)\w*",
+    r"\boperator\w*ni\s+chaqir\w*",
+    # "jonli/haqiqiy/haqiqi odam" (oxiridagi "y"siz shakl ham keng tarqalgan)
+    r"\b(jonli|haqiq\w*|tirik|real)\s+(odam|operator|inson|kishi)\w*",
+    # "odam bilan gaplash", "odam yozsin", "odam javob bersin"
+    r"\bodam\w*\s+(bilan|yoz\w*|javob|gaplash\w*|bog[’'`]?lan\w*)",
+    r"\binson\w*\s+(bilan|ulang|yordam|yoz\w*)\w*",
+    # ⚠️ Do'kon EGASI / rahbar so'ralgan holat ham handoff hisoblanadi
+    # (2026-10-18 da qo'shildi: "men haqiqi egalaring bilan
+    # bog'lanmoqchiman" kabi xabarlar avval umuman aniqlanmasdi).
+    # "ega" so'zi faqat harakat so'zi bilan birga kelganda hisobga
+    # olinadi — "bu kursga ega bo'lmoqchiman" kabi oddiy jumlalar
+    # noto'g'ri aniqlanmasligi uchun.
+    r"\beg(a|asi|alari|alaring|angiz|am)\s+(bilan|chaqir\w*|bog[’'`]?lan\w*|yoz\w*|gaplash\w*)",
+    r"\b(rahbar\w*|xo[’'`]?jayin\w*|direktor\w*)\s+(bilan|chaqir\w*|bog[’'`]?lan\w*|yoz\w*|gaplash\w*|kerak)",
+    r"\bmenejer\w*\s+(bilan|chaqir\w*|ulan\w*|kerak|bormi)\w*",
+    r"\bcall\s*center\b",
+    r"\bhuman\s+(agent|support|operator)\b",
+    r"\bоператор\w*\s+(с|позов|свяж|нужен|есть)\w*",
+    r"\b(живой|реальн\w*)\s+(человек|оператор)\w*",
+    r"\bс\s+человеком\b",
+)
+
+
 # ⚠️ Guruh spam/reklama tozalash (foydalanuvchi so'ragan funksiya):
 # faqat ANIQ, ob'ektiv signallar tekshiriladi — xato pozitiv (haqiqiy
 # mijoz savolini spam deb o'chirib yuborish) narxi juda yuqori, shuning
@@ -785,8 +822,7 @@ def process_incoming_message(
         # qilamiz (pastdagi 5.6-band, "insonning tuzatishiga hurmat" tekshiruvi).
 
         # ── 4.6. Operator Handoff Trigger (Mijoz Insoniy Operator So'raganda) ─
-        HANDOFF_KEYWORDS = ["operator", "odam bilan", "insonga", "call center", "menejer", "human"]
-        is_handoff_requested = any(kw in cmd_text for kw in HANDOFF_KEYWORDS)
+        is_handoff_requested = any(re.search(p, cmd_text) for p in HANDOFF_PATTERNS)
 
         if is_handoff_requested:
             logger.info(f"[Task] Mijoz operator so'radi! Handoff rejimiga o'tilmoqda: customer={customer}")
@@ -1189,10 +1225,13 @@ def process_incoming_message(
             # aybni mijozga ham, tizimga ham yuklamaydi, lekin ANIQ
             # nimani qayta yuborish kerakligini aytadi — suhbat davom
             # etaveradi, mijoz raqamini tuzatib qayta yuborishi mumkin.
+            # ⚠️ Matn ataylab QISQA va quruq (do'kon egasining talabi,
+            # 2026-10-18): "rahmat, ism!" kabi iliq kirish so'zlari bu
+            # yerda ortiqcha — mijozga faqat NIMA xato ekani va nima
+            # qilish kerakligi aytilsa kifoya.
             _LEAD_FAILURE_TEXT = (
-                "Ma'lumotlaringizni qabul qila olmadim 🙏 Iltimos, "
-                "<b>ism-familiyangiz va telefon raqamingizni</b> qayta yuboring "
-                "(telefon raqami +998 90 123 45 67 ko'rinishida bo'lsin)."
+                "Telefon raqami noto'g'ri ko'rinmoqda. Iltimos, qaytadan "
+                "tekshirib yuboring (masalan: +998 90 123 45 67)."
             )
             final_text = ai_response.text
             lead = None

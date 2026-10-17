@@ -129,13 +129,32 @@ def _normalize_phone(raw_phone: str) -> tuple[Optional[str], Optional[str]]:
         return None, "raqamdan tashqari belgilar bor"
 
     digits = re.sub(r"\D", "", raw)
+    has_plus = raw.startswith("+")
+
+    # ⚠️ Jonli aniqlangan xato (2026-10-18): avval shunchaki "9-15 xona"
+    # deb tekshirilardi va mijoz bitta ortiqcha raqam qo'shib yuborganda
+    # ("9345678690" — 10 xona) tizim uni YAROQLI deb qabul qilgan edi.
+    # Natijada egaga qo'ng'iroq qilib bo'lmaydigan raqam borardi.
+    # Endi O'zbekiston formatlari ANIQ tekshiriladi:
+    #   • 9 xona            → milliy raqam (901234567)
+    #   • 12 xona, 998 bilan → xalqaro kod bilan (998901234567)
+    # Boshqa davlat raqami kiritilsa, u "+" bilan boshlanishi kerak —
+    # bu mijozning xalqaro raqam yozayotgani haqidagi ANIQ signali
+    # (aks holda har qanday tasodifiy raqamlar ketma-ketligi o'tib
+    # ketaverardi).
+    if has_plus:
+        if len(digits) < 10 or len(digits) > _PHONE_MAX_DIGITS:
+            return None, f"xalqaro raqam uzunligi noto'g'ri ({len(digits)} xona)"
+        return f"+{digits}", None
+
+    if len(digits) == 9:
+        return digits, None
+    if len(digits) == 12 and digits.startswith("998"):
+        return f"+{digits}", None
+
     if len(digits) < _PHONE_MIN_DIGITS:
         return None, f"juda qisqa ({len(digits)} xona)"
-    if len(digits) > _PHONE_MAX_DIGITS:
-        return None, f"juda uzun ({len(digits)} xona)"
-
-    plus_prefix = "+" if raw.startswith("+") else ""
-    return f"{plus_prefix}{digits}", None
+    return None, f"noto'g'ri uzunlik ({len(digits)} xona)"
 
 
 def _validate_full_name(raw_name: str) -> tuple[Optional[str], Optional[str]]:
