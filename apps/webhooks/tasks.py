@@ -899,6 +899,26 @@ def process_incoming_message(
                 f"store_ai_active={store.ai_active} | "
                 f"customer_ai_active={getattr(customer, 'ai_active', True)}"
             )
+
+            # ⚠️ Jonli aniqlangan xato (2026-10-19): operatorga o'tkazilgan
+            # mijoz BUTUNLAY javobsiz qolardi — u nima bo'lganini bilmay,
+            # "?", "javob ber" deb yozishda davom etardi (bot o'lib
+            # qolgandek ko'rinardi). Endi bir marta qisqa xabar yuboriladi,
+            # shundan keyin bot jim qoladi (odam javob berishi uchun).
+            # Guruhda yuborilmaydi — u yerda har bir xabarga shunday javob
+            # yozish shovqin bo'lardi.
+            if not is_group:
+                notice_key = f"handoff_notice_sent:{store.id}:{customer.id}"
+                if cache.add(notice_key, True, timeout=60 * 60 * 6):
+                    _send_command_reply(
+                        store, customer, platform, chat_id,
+                        text=(
+                            "Xabaringizni mutaxassisimizga yetkazdim — "
+                            "u tez orada shu yerda javob beradi 😊"
+                        ),
+                        is_group_message=False,
+                    )
+
             # Dastlabki xabarni COMPLETED deb belgilaymiz va javob qaytarmaymiz
             ChatMessage.objects.filter(id=chat_message.id).update(
                 processing_status=ChatMessage.ProcessingStatus.COMPLETED
