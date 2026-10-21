@@ -600,7 +600,10 @@ class SuperAdminTWAAccessRevokeView(APIView):
         if not result["changed"]:
             return Response({"error": "Bu biznesda hozir ega biriktirilmagan."}, status=status.HTTP_400_BAD_REQUEST)
 
-        log_action(actor=request.user, action=AuditLog.Action.TWA_ACCESS_REVOKED, store=store)
+        log_action(
+            actor=request.user, action=AuditLog.Action.TWA_ACCESS_REVOKED, store=store,
+            metadata={"old_owner_chat_id": result["old_chat_id"]},
+        )
         return Response({"success": True, "admin_link": _compute_admin_link(store)}, status=status.HTTP_200_OK)
 
 
@@ -652,8 +655,11 @@ class SuperAdminTWAAccessChangeOwnerView(APIView):
         if not store:
             return Response({"error": "Biznes topilmadi"}, status=status.HTTP_404_NOT_FOUND)
 
-        revoke_store_owner(store)  # unconditional — o'zgarish bo'lmasa ham davom etadi
-        log_action(actor=request.user, action=AuditLog.Action.TWA_ACCESS_CHANGED, store=store)
+        result = revoke_store_owner(store)  # unconditional — o'zgarish bo'lmasa ham davom etadi
+        log_action(
+            actor=request.user, action=AuditLog.Action.TWA_ACCESS_CHANGED, store=store,
+            metadata={"old_owner_chat_id": result["old_chat_id"]},
+        )
         return Response({"success": True, "admin_link": _compute_admin_link(store)}, status=status.HTTP_200_OK)
 
 

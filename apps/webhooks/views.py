@@ -389,6 +389,26 @@ class TelegramWebhookView(View):
         # — bu do'konning AI byudjetini isrof qilardi va uning Inbox'ini
         # keraksiz suhbatlar bilan to'ldirardi. Endi bunday holatda HECH
         # QANDAY do'konga biriktirilmaydi (None qaytariladi).
+        #
+        # ⚠️ LEKIN BU FAQAT UMUMIY (MASTER) BOTGA TEGISHLI. Do'konning
+        # O'Z SHAXSIY boti (alohida @username va alohida token) bo'lsa,
+        # token BITTA do'konga tegishli — noaniqlik umuman yo'q, demak
+        # yuqoridagi xavf ham yo'q. Bunday botda mijoz Telegram qidiruvi
+        # orqali topib "/start" bossa ham, u aniq o'sha do'konning mijozi.
+        #
+        # Jonli aniqlangan xato (2026-10-21): @pdpacademy96bot'ga to'g'ridan
+        # kirgan mijoz "Bu bot faqat maxsus taklif havolasi orqali ishlaydi"
+        # degan xabarni olib, umuman javob ololmay qolgan.
+        master_token = (getattr(settings, "TELEGRAM_BOT_TOKEN", "") or "").strip()
+        if bot_token and bot_token.strip() != master_token:
+            dedicated_store = self._get_store_by_token(bot_token)
+            if dedicated_store:
+                logger.info(
+                    "Telegram: do'konning shaxsiy boti orqali kirildi — "
+                    f"do'kon avtomatik aniqlandi | store={dedicated_store.name}"
+                )
+                return dedicated_store
+
         return None
 
     def _bind_group_to_store(self, store: Store, chat_id: str, bot_token: str) -> None:

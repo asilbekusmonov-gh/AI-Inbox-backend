@@ -541,6 +541,21 @@ def process_incoming_message(
                         return
 
                     logger.info(f"[Task] Do'kon egasi biriktirildi: store={store.name}, owner_tg_id={sender_id}")
+                    # Auditga yozamiz: egalik KIMGA o'tgani keyinchalik aniq
+                    # ko'rinib turishi uchun (best-effort — xato bo'lsa ham
+                    # egalik biriktirilgan bo'lib qoladi).
+                    from apps.audit.models import AuditLog as _AuditLog
+                    from apps.audit.services import log_action as _log_action
+                    _log_action(
+                        actor=None,
+                        actor_display=f"Telegram #{sender_id}",
+                        action=_AuditLog.Action.TWA_OWNER_ASSIGNED,
+                        store=store,
+                        metadata={
+                            "owner_chat_id": str(sender_id),
+                            "username": getattr(customer, "username", "") or "",
+                        },
+                    )
                     is_admin = True
 
 

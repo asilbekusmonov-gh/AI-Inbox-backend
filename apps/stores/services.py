@@ -773,6 +773,13 @@ def provision_store(name: str, category_type: str, bot_username: str = "LeadNode
                 username=username,
                 email=f"{username}@placeholder.local",
             )
+            # ⚠️ Bu akkaunt FAQAT texnik "egasi" yozuvi — unga hech kim
+            # parol bilan kirmaydi (kirish Telegram initData orqali).
+            # Parol maydoni bo'sh qolsa Django uni "yaroqli" deb ko'rsatadi;
+            # yaroqsiz qilib belgilash egalik o'tkazilgandan keyin sobiq
+            # eganing parol/JWT orqali kirish yo'lini butunlay yopadi.
+            owner.set_unusable_password()
+            owner.save(update_fields=["password"])
 
             store = Store.objects.create(
                 owner=owner,
@@ -839,7 +846,39 @@ def revoke_store_owner(store: "Store") -> dict:
     old_chat_id = store.tg_owner_chat_id
     store.tg_owner_chat_id = None
     store.save(update_fields=["tg_owner_chat_id", "updated_at"])
+    # Auth keshi (20s) eski egani darrov chiqarib tashlashi uchun
+    cache.delete(f"store_by_tgowner:{old_chat_id}")
+    _reset_owner_menu_button(store, old_chat_id)
     return {"changed": True, "old_chat_id": old_chat_id}
+
+
+def _reset_owner_menu_button(store: "Store", chat_id) -> None:
+    """
+    Sobiq eganing chatidagi "Dashboard" tugmasini standart holatga qaytaradi.
+
+    ⚠️ Jonli aniqlangan xato (2026-10-21): ega almashtirilgandan keyin
+    sobiq ega botga oddiy mijoz sifatida kirsa ham, Telegram menyusida
+    eski "Dashboard" tugmasi turib qolgan edi. Bu tugma Telegram
+    serverida (bizning bazada EMAS), chat bo'yicha saqlanadi va faqat
+    biz uni aniq o'zgartirsak o'chadi. Ma'lumotlar baribir ko'rinmasdi
+    (API 401 qaytaradi), lekin bo'sh boshqaruv paneli ochilib qolardi.
+
+    Best-effort: Telegram javob bermasa, egalikni bo'shatish baribir
+    muvaffaqiyatli tugaydi.
+    """
+    token = getattr(store, "tg_bot_token", "") or ""
+    if not token or not chat_id:
+        return
+    try:
+        res = httpx.post(
+            f"{TELEGRAM_API_BASE}{token}/setChatMenuButton",
+            json={"chat_id": int(chat_id), "menu_button": {"type": "default"}},
+            timeout=10.0,
+        )
+        if not res.json().get("ok"):
+            logger.warning(f"Sobiq ega menyu tugmasi tiklanmadi: {res.json()}")
+    except (httpx.HTTPError, ValueError) as e:
+        logger.warning(f"Sobiq ega menyu tugmasi tiklanmadi: {e}")
 
 
 # ─────────────────────────────────────────────────────────────

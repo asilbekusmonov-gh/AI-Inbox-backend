@@ -20,6 +20,10 @@ class AuditLog(models.Model):
         TWA_ACCESS_REVOKED = "twa_access_revoked", "TWA kirish huquqi bekor qilindi"
         TWA_ACCESS_RESTORED = "twa_access_restored", "TWA kirish huquqi tiklandi"
         TWA_ACCESS_CHANGED = "twa_access_changed", "TWA foydalanuvchisi almashtirildi"
+        # ⚠️ Yuqoridagi uchtasi — SUPER ADMIN amallari. Bu esa Telegram'da
+        # `/start admin_<uuid>` bosilganda egalik HAQIQATAN kimga o'tganini
+        # yozadi (avval bu yozilmasdi: "kim ega bo'ldi?" savoliga javob yo'q edi).
+        TWA_OWNER_ASSIGNED = "twa_owner_assigned", "TWA egasi biriktirildi"
         TOKEN_CONNECTED = "token_connected", "Bot tokeni ulandi"
         TOKEN_DISCONNECTED = "token_disconnected", "Bot tokeni uzildi"
         SUBSCRIPTION_PLAN_CHANGED = "subscription_plan_changed", "Obuna rejasi o'zgartirildi"

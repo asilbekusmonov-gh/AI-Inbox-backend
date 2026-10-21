@@ -11,9 +11,21 @@ from apps.audit.models import AuditLog, PlatformError
 logger = logging.getLogger(__name__)
 
 
-def log_action(*, actor, action: str, store=None, metadata: dict | None = None) -> None:
+def log_action(
+    *, actor, action: str, store=None, metadata: dict | None = None,
+    actor_display: str | None = None,
+) -> None:
+    """
+    `actor_display` — admin User bo'lmagan amallar uchun (masalan Telegram'da
+    admin havolasini bosgan odam: `actor=None, actor_display="Telegram #123"`).
+    """
     try:
-        actor_display = getattr(actor, "first_name", "") or getattr(actor, "username", "") or "noma'lum"
+        actor_display = (
+            actor_display
+            or getattr(actor, "first_name", "")
+            or getattr(actor, "username", "")
+            or "noma'lum"
+        )
         AuditLog.objects.create(
             actor=actor if getattr(actor, "pk", None) else None,
             actor_display=actor_display,
