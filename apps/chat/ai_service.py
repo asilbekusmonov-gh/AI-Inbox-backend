@@ -535,6 +535,11 @@ def _redirect_to_contact_after_script(
         return text
     if not _full_info_already_sent(history):
         return text
+    # Mijoz xabarida raqam bor — u kontaktni ALLAQACHON bermoqda, qayta
+    # so'ramaymiz (raqam yaroqsiz bo'lsa, buni alohida to'siq hal qiladi).
+    from apps.chat.lead_service import find_phone_candidate
+    if find_phone_candidate(user_message):
+        return text
     if _CONTACT_ASK_MARKER in text.lower():
         return text
 
@@ -803,6 +808,114 @@ def _append_contact_offer_after_availability(
 
     logger.info("Mavjudlik savoliga javob berildi — yumshoq kontakt taklifi qo'shildi")
     return f"{text.rstrip()}\n\n{_AVAILABILITY_CONTACT_TAIL}"
+
+
+# ⚠️ Jonli aniqlangan xato (2026-10-24): bot ism-familiya va telefon
+# so'ragach, mijoz oddiygina "yoq" dedi. Bu — kontaktni bermaslik, lekin
+# "shu yerda ayting" (ma'lumot so'rash) EMAS. AI buni to'liq skript
+# so'rovi deb tushundi, kod darvozasi esa uni to'sib, kontakt so'rovini
+# YANA qaytardi — mijoz "yoq" dedi, bot esa yana so'radi. To'g'ri javob:
+# "Tushunarli, savollaringiz bo'lsa so'rang" — bosim yo'q.
+_BARE_REFUSAL_CORE_TOKENS = {"yo'q", "yoq", "yok", "yo'k", "нет", "net", "emas"}
+_BARE_REFUSAL_FILLER_TOKENS = {
+    "rahmat", "raxmat", "shart", "kerak", "hozir", "hozircha", "hali",
+    "mayli", "hop", "xop", "xo'p", "ok", "okay", "keyin", "bo'ldi", "boldi",
+    "спасибо", "spasibo",
+}
+_REFUSAL_ACK_TEXT = "Tushunarli 😊 Savollaringiz bo'lsa, shu yerda bemalol so'rashingiz mumkin."
+_REFUSAL_ACK_TEXT_ALT = "Mayli 😊 Boshqa savollaringiz bo'lsa, javob berishga tayyorman."
+_REFUSAL_ACK_MARKERS = ("bemalol so'rashingiz", "javob berishga tayyorman")
+
+
+def _is_bare_refusal(message: str) -> bool:
+    """
+    Qisqa, savolsiz rad javobi: "yoq", "yo'q rahmat", "hozir emas", "kerak emas".
+
+    ⚠️ Faqat 1-4 so'zdan iborat va FAQAT rad/to'ldiruvchi so'zlardan tuzilgan
+    xabar. "yoq nega mutaxassislar men bilan bog'lanishi kerak?" kabi
+    savolli xabar bu yerga TUSHMAYDI (u haqiqiy savol).
+    """
+    normalized = (message or "").lower()
+    for ch in "’‘`ʻʼ":
+        normalized = normalized.replace(ch, "'")
+    tokens = re.findall(r"[\w']+", normalized, flags=re.UNICODE)
+    if not 1 <= len(tokens) <= 4:
+        return False
+    allowed = _BARE_REFUSAL_CORE_TOKENS | _BARE_REFUSAL_FILLER_TOKENS
+    return all(t in allowed for t in tokens) and any(t in _BARE_REFUSAL_CORE_TOKENS for t in tokens)
+
+
+def _refusal_ack_text(history: list) -> str:
+    """Tushunish xabari: avval yuborilgan bo'lsa — boshqacha so'z bilan."""
+    for turn in history or []:
+        if turn.get("role") != "model":
+            continue
+        for part in turn.get("parts") or []:
+            text = (part.get("text", "") if isinstance(part, dict) else str(part)).lower()
+            if any(marker in text for marker in _REFUSAL_ACK_MARKERS):
+                return _REFUSAL_ACK_TEXT_ALT
+    return _REFUSAL_ACK_TEXT
+
+
+def _lead_from_customer_message(lead_data, history: list, customer, user_message: str, store):
+    """
+    Mijoz ism+yaroqli raqamni o'zi yozgan, lekin AI lid JSON'ini qaytarmagan
+    bo'lsa — lid ma'lumotini KOD o'zi tuzadi (AI'ning xatosiga bog'liq emas).
+
+    Faqat bot kontaktni ALLAQACHON so'ragan bo'lsa ishlaydi — shunda mijoz
+    xabari kontakt javobi ekani deyarli aniq.
+
+    Returns: (lead_data, tasdiq_matni | None)
+    """
+    from apps.chat.lead_service import CONTACT_RECEIVED_TEXT, extract_contact_from_message
+
+    if lead_data is not None or getattr(customer, "phone_number", None):
+        return lead_data, None
+    if not _bot_already_asked_for_contact(history):
+        return lead_data, None
+
+    contact = extract_contact_from_message(user_message)
+    if not contact:
+        return lead_data, None
+
+    product = _resolve_interested_product(store, customer, history)
+    built = {
+        **contact,
+        "lead_status": "warm",
+        "notes": "Mijoz ism va raqamni o'zi yozdi (AI lid blokini qaytarmagani uchun kod orqali aniqlandi).",
+        "course_name": getattr(product, "name", "") or "",
+    }
+    first_name = contact["full_name"].split()[0]
+    logger.info(f"Mijoz kontaktini o'zi yozdi — lid kod orqali tuzildi | ism={first_name}")
+    return built, CONTACT_RECEIVED_TEXT.format(name=first_name)
+
+
+def _handle_phone_in_message(text: str, customer, has_lead: bool, user_message: str) -> str:
+    """
+    Mijoz xabarida telefon raqami bor va u YAROQSIZ bo'lsa — AI javobi
+    o'rniga aniq "raqam noto'g'ri" xabari qaytariladi.
+
+    ⚠️ Jonli aniqlangan xato (2026-10-24): mijoz "asilbek usmnonov
+    9345678729" (10 xona — bitta ortiqcha raqam) yozdi. AI buni lid deb
+    ajratmadi, shuning uchun bot "telefon raqamingizni qoldiring" deb
+    QAYTA so'radi — mijoz hozirgina bergan narsani. Endi raqam kod
+    darajasida tekshiriladi va mijozga NIMA xato ekani aytiladi.
+    """
+    from apps.chat.lead_service import INVALID_PHONE_TEXT, _normalize_phone, find_phone_candidate
+
+    if not text or has_lead or getattr(customer, "phone_number", None):
+        return text
+
+    candidate = find_phone_candidate(user_message)
+    if not candidate:
+        return text
+
+    normalized, reason = _normalize_phone(candidate)
+    if normalized:
+        return text  # raqam yaroqli — lid oqimi o'zi davom etadi
+
+    logger.info(f"Mijoz yaroqsiz raqam yubordi ({reason}) — tuzatish so'ralmoqda")
+    return INVALID_PHONE_TEXT
 
 
 def _ensure_contact_ask(
@@ -2360,6 +2473,23 @@ def _call_gemini(store, customer, user_message: str, model_name: str = "gemini-3
             is_silent=True,
         )
 
+    # ⚠️ Bot kontakt so'ragan, mijoz esa oddiygina "yoq" dedi (ma'lumot
+    # so'ramadi) — bosim qilmasdan tushunamiz. Bu AI javobidan (jumladan
+    # SEND_FULL_INFO belgisidan) USTUN turadi.
+    if (
+        not is_group
+        and not getattr(customer, "phone_number", None)
+        and _is_bare_refusal(user_message)
+        and _bot_already_asked_for_contact(history)
+    ):
+        logger.info("Mijoz kontaktni oddiy 'yoq' bilan rad etdi — bosimsiz javob beriladi")
+        return AIResponse(
+            text=_refusal_ack_text(history),
+            tokens_used=tokens_used,
+            model_used=model_name,
+            conversation_state=_extract_conversation_state(response_text),
+        )
+
     # ⚠️ Mijoz kontaktni rad etdi va ma'lumotni shu yerda so'radi —
     # AI "SEND_FULL_INFO: <nom>" deb belgi qaytargan. Matnni AI emas,
     # SHU YERDA, kod o'zi yig'adi: `Product.full_info` AYNAN o'zgarishsiz
@@ -2423,6 +2553,14 @@ def _call_gemini(store, customer, user_message: str, model_name: str = "gemini-3
                     conversation_state=conversation_state,
                 )
 
+        lead_data, _received_text = _lead_from_customer_message(
+            lead_data, history, customer, user_message, store,
+        )
+        if _received_text:
+            clean_text = _received_text
+        clean_text = _handle_phone_in_message(
+            clean_text, customer, has_lead=lead_data is not None, user_message=user_message,
+        )
         clean_text = _scrub_private_multi_course_price_dump(clean_text, store)
         # ⚠️ Kontakt olinmagan va rad ham etilmagan bo'lsa — narx/muddat
         # kabi faktlar umuman chiqmasligi kerak (yuqoridagi funksiya

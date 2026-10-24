@@ -49,7 +49,12 @@ GROUP_REPLY_COOLDOWN_SECONDS = 20
 # kabi harakat so'zi bo'lishi kerak.
 HANDOFF_PATTERNS = (
     # "operator bilan", "operatorni chaqiring", "operator kerak"
-    r"\boperator\w*\s+(bilan|chaqir\w*|ulan\w*|kerak|bormi|bera|yoz|javob|bog)\w*",
+    # ⚠️ "bog'lan"/"javob"/"yoz" faqat TALAB shaklida (bog'lansin, javob
+    # bersin, yozsin). Jonli xato (2026-10-24): "qachon operatorlarimiz
+    # bog'lanishadi?" — bu bot O'ZI va'da qilgan qo'ng'iroq haqidagi savol,
+    # operator talab qilish emas; avval shu sabab bot o'chib qolgan edi.
+    r"\boperator\w*\s+(bilan|chaqir\w*|ulan\w*|kerak|bormi|bera\b)",
+    r"\boperator\w*\s+(bog[’'`]?lan(sin|sa|ing|g)|bog[’'`]?lang|javob\s+(bersin|bering|bersa)|yoz(sin|sa|ing))\w*",
     r"\boperator\w*ni\s+chaqir\w*",
     # "jonli/haqiqiy/haqiqi odam" (oxiridagi "y"siz shakl ham keng tarqalgan)
     r"\b(jonli|haqiq\w*|tirik|real)\s+(odam|operator|inson|kishi)\w*",
@@ -885,6 +890,23 @@ def process_incoming_message(
                     reply_markup=reply_markup,
                 )
 
+            # ⚠️ Jonli aniqlangan xato (2026-10-24): handoff'ni keltirib
+            # chiqargan xabarning O'ZIGA mijoz hech narsa olmasdi — "yetkazdim"
+            # xabari faqat KEYINGI xabarda kelardi, shu orada bot "o'lib
+            # qolgandek" ko'rinardi. Endi darrov xabar beriladi (4.7-banddagi
+            # takroriy ogohlantirish kaliti bilan — ikki marta yuborilmaydi).
+            if not is_group:
+                _notice_key = f"handoff_notice_sent:{store.id}:{customer.id}"
+                if cache.add(_notice_key, True, timeout=60 * 60 * 6):
+                    _send_command_reply(
+                        store, customer, platform, chat_id,
+                        text=(
+                            "Xabaringizni mutaxassisimizga yetkazdim — "
+                            "u tez orada shu yerda javob beradi 😊"
+                        ),
+                        is_group_message=False,
+                    )
+
             ChatMessage.objects.filter(id=chat_message.id).update(
                 processing_status=ChatMessage.ProcessingStatus.COMPLETED
             )
@@ -1264,10 +1286,7 @@ def process_incoming_message(
             # 2026-10-18): "rahmat, ism!" kabi iliq kirish so'zlari bu
             # yerda ortiqcha — mijozga faqat NIMA xato ekani va nima
             # qilish kerakligi aytilsa kifoya.
-            _LEAD_FAILURE_TEXT = (
-                "Telefon raqami noto'g'ri ko'rinmoqda. Iltimos, qaytadan "
-                "tekshirib yuboring (masalan: +998 90 123 45 67)."
-            )
+            from apps.chat.lead_service import INVALID_PHONE_TEXT as _LEAD_FAILURE_TEXT
             final_text = ai_response.text
             lead = None
             fallback_lead = None

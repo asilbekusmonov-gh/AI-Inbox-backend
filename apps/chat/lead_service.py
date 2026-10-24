@@ -157,6 +157,78 @@ def _normalize_phone(raw_phone: str) -> tuple[Optional[str], Optional[str]]:
     return None, f"noto'g'ri uzunlik ({len(digits)} xona)"
 
 
+# ⚠️ Yaroqsiz raqam yuborilganda mijozga ko'rsatiladigan YAGONA matn
+# (avval apps/webhooks/tasks.py ichida alohida yozilgan edi).
+INVALID_PHONE_TEXT = (
+    "Telefon raqami noto'g'ri ko'rinmoqda. Iltimos, qaytadan "
+    "tekshirib yuboring (masalan: +998 90 123 45 67)."
+)
+
+# Telefonga o'xshash raqamlar ketma-ketligi (bo'shliq, tire, qavs bilan).
+_PHONE_CANDIDATE_RE = re.compile(r"\+?\d[\d\s().\-]{7,}\d")
+# Narx/yil kabi oddiy sonlar ("1 800 000") telefon deb olinmasligi uchun
+# kamida shuncha xona bo'lishi kerak (eng qisqa yaroqli raqam — 9 xona).
+_PHONE_CANDIDATE_MIN_DIGITS = 9
+
+
+def find_phone_candidate(message: str) -> Optional[str]:
+    """Xabar ichidan telefon raqamiga o'xshash qismni topadi (topilmasa None)."""
+    for match in _PHONE_CANDIDATE_RE.finditer(message or ""):
+        candidate = match.group(0).strip()
+        if len(re.sub(r"\D", "", candidate)) >= _PHONE_CANDIDATE_MIN_DIGITS:
+            return candidate
+    return None
+
+
+# Mijoz kontaktini o'zi yozganda (AI buni lid deb ajratmagan bo'lsa ham)
+# kod o'zi qabul qiladigan holat uchun — qisqa tasdiq matni.
+CONTACT_RECEIVED_TEXT = "Rahmat, {name}! Ma'lumotlaringizni qabul qildim — mutaxassisimiz tez orada siz bilan bog'lanadi 😊"
+
+# Ismni ajratishda tashlab yuboriladigan so'zlar ("ismim Ali, raqamim ...").
+_NAME_FILLER_WORDS = {
+    "ismim", "ism", "familiyam", "familiya", "raqamim", "raqam", "nomerim", "nomer",
+    "telefonim", "telefon", "tel", "men", "mening", "meniki", "bu", "mana", "my", "name", "phone",
+}
+
+
+def extract_contact_from_message(message: str) -> Optional[dict]:
+    """
+    Mijoz xabaridan DETERMINISTIK tarzda (AI'siz) ism + yaroqli telefon raqamini ajratadi.
+
+    ⚠️ Jonli aniqlangan xato (2026-10-24): mijoz "Asilbek Usmonov 998787653"
+    deb yozdi. Bu — haqiqiy raqam (99 878 76 53), bizning tekshiruvimiz ham
+    uni qabul qiladi, lekin AI uni "998 bilan boshlanadigan to'liq bo'lmagan
+    xalqaro raqam" deb o'ylab, o'zi "Telefon raqami noto'g'ri" deb javob
+    berdi va lid yaratilmadi.
+
+    Returns:
+        {"full_name": ..., "phone": ...} — ikkalasi ham yaroqli bo'lsa, aks holda None.
+    """
+    text = message or ""
+    if "?" in text:
+        return None  # savol — kontakt emas
+
+    candidate = find_phone_candidate(text)
+    if not candidate:
+        return None
+    phone, _reason = _normalize_phone(candidate)
+    if not phone:
+        return None
+
+    rest = text.replace(candidate, " ")
+    rest = re.sub(r"[^\w\s'’`-]", " ", rest, flags=re.UNICODE)
+    tokens = [
+        t for t in rest.split()
+        if t.lower() not in _NAME_FILLER_WORDS and not t.isdigit()
+    ]
+    if not 1 <= len(tokens) <= 4:
+        return None
+    name, _name_reason = _validate_full_name(" ".join(tokens))
+    if not name:
+        return None
+    return {"full_name": name, "phone": phone}
+
+
 def _validate_full_name(raw_name: str) -> tuple[Optional[str], Optional[str]]:
     """
     Ism-familiyani DETERMINISTIK tekshiradi va ortiqcha bo'shliqlardan
