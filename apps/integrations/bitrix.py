@@ -38,14 +38,23 @@ def validate_bitrix24_webhook(webhook_url: str) -> tuple[bool, str]:
         (False, tushunarli_xabar) — saqlashdan oldin foydalanuvchiga
                                      ko'rsatiladigan aniq sabab
     """
+    # ⚠️ SSRF himoyasi: ichki/ommaviy bo'lmagan manzilga umuman so'rov YUBORILMAYDI.
+    from apps.core.url_safety import validate_outbound_url
+
+    is_safe, reason = validate_outbound_url(webhook_url)
+    if not is_safe:
+        return False, reason
+
     url = webhook_url.rstrip("/") + "/crm.status.list.json"
     try:
         with httpx.Client(timeout=10.0) as client:
             response = client.get(url)
         data = response.json()
     except Exception as e:
+        # ⚠️ Xato matni ({e}) foydalanuvchiga QAYTARILMAYDI — u manzil ortidagi xizmat haqida
+        # tafsilot (masalan "Server disconnected", "Expecting value") ochib berardi.
         logger.warning(f"[Bitrix24] Webhook tekshiruvida tarmoq xatosi: {e}")
-        return False, f"Bitrix24'ga ulanib bo'lmadi — manzilni tekshiring ({e})"
+        return False, "Bitrix24'ga ulanib bo'lmadi — manzilni tekshiring."
 
     error = data.get("error")
     if not error:
@@ -167,6 +176,14 @@ def push_lead_to_bitrix24(webhook_url: str, lead) -> bool:
         False — webhook sozlanmagan, tarmoq xatosi yoki Bitrix xato qaytardi
     """
     if not webhook_url:
+        return False
+
+    # ⚠️ SSRF himoyasi: manzil saqlanganidan keyin DNS o'zgargan yoki eski (tekshiruvsiz)
+    # yozuv bo'lishi mumkin — har yuborishdan oldin QAYTA tekshiriladi.
+    from apps.core.url_safety import is_safe_outbound_url
+
+    if not is_safe_outbound_url(webhook_url):
+        logger.error(f"[Bitrix24] Xavfsiz bo'lmagan webhook manzili — yuborilmadi | lid={lead.lead_number}")
         return False
 
     _ensure_uzs_currency(webhook_url)

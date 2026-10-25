@@ -187,9 +187,21 @@ class TelegramWebhookView(View):
             logger.info(f"Telegram: dublikat xabar, o'tkazib yuborildi | msg_id={message.message_id}")
             return HttpResponse(status=200)
 
+        # 4.9 Ketma-ket yozilgan xabarlarni birlashtirish: shaxsiy chatdagi oddiy
+        # matn bir necha soniya kutib qayta ishlanadi (apps/webhooks/burst.py).
+        from . import burst as _burst
+
+        _extra = {}
+        if _burst.is_candidate(chat_type=message.chat_type, text=message.text) and _burst.register(
+            store_id=store.id, sender_id=message.sender_id,
+            message_id=message.message_id, text=message.text,
+        ):
+            _extra["countdown"] = _burst.window_seconds()
+
         # 5. Celery navbatiga jo'natamiz (ASYNCHRONOUS!)
         try:
             task = process_incoming_message.apply_async(
+                **_extra,
                 args=[],
                 kwargs={
                     "store_id": str(store.id),

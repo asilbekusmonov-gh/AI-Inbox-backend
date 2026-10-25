@@ -158,7 +158,15 @@ class ProductViewSet(viewsets.ModelViewSet):
                 price=price,
             )
         except Exception as e:
-            logger.error(f"[AI File Analyze] Tahlil xatosi: {e} | store={target_store.name}", exc_info=True)
+            # ⚠️ Google xato matni so'rov URL'ini (ichida API kaliti bilan)
+            # o'z ichiga olishi mumkin — jonli logda kalit ochiq chiqib
+            # qolgani aniqlandi. Shu sabab kalit yashiriladi va traceback
+            # (u ham xuddi shu matnni takrorlaydi) yozilmaydi.
+            from django.conf import settings as _settings
+            _safe = str(e).replace(_settings.GEMINI_API_KEY or "\0", "***")
+            logger.error(
+                f"[AI File Analyze] Tahlil xatosi: {type(e).__name__}: {_safe} | store={target_store.name}"
+            )
             return Response(
                 {"error": "AI faylni tahlil qila olmadi. Birozdan so'ng qayta urinib ko'ring yoki to'liq shaklni ishlating."},
                 status=status.HTTP_502_BAD_GATEWAY,

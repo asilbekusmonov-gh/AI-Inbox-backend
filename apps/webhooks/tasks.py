@@ -344,6 +344,11 @@ def process_incoming_message(
 
     is_group = chat_type in ("group", "supergroup")
 
+    # Ketma-ket xabarlarni birlashtirish holati (qarang: apps/webhooks/burst.py).
+    # `flip` — task oxirida oldingi (qo'shilgan) xabarlarni "bajarildi" deb belgilash kerakmi
+    # (qayta urinish bo'ladigan holatda belgilanmaydi).
+    _burst_state = {"members": [], "flip": True}
+
     try:
         # ── 1. Do'konni olish ────────────────────────────────────────
         try:
@@ -407,6 +412,30 @@ def process_incoming_message(
                 f"[Task] Dublikat xabar, skip: msg_id={message_id}"
             )
             return
+
+        # ── 3.1. Ketma-ket yozilgan xabarlarni birlashtirish ──────────
+        # Mijoz fikrini bo'lib-bo'lib yozsa (har biri oldingisidan bir necha soniya
+        # ichida), faqat ENG OXIRGI xabar javob beradi — hammasini birlashtirib.
+        # Oldingilari SKIPPED bo'lib turadi (AI tarixiga ikki marta kirmasligi
+        # uchun) va task oxirida "bajarildi"ga o'tkaziladi.
+        from apps.webhooks import burst as _burst
+
+        if _burst.is_candidate(chat_type=chat_type, text=text):
+            _outcome = _burst.resolve(
+                store_id=store.id, sender_id=sender_id,
+                message_id=message_id, own_text=text,
+            )
+            if _outcome.superseded:
+                logger.info(f"[Task] Yangiroq xabar bor — bu xabar birlashtiriladi | msg_id={message_id}")
+                ChatMessage.all_objects.filter(id=chat_message.id).update(
+                    processing_status=(
+                        ChatMessage.ProcessingStatus.COMPLETED if _outcome.consumed
+                        else ChatMessage.ProcessingStatus.SKIPPED
+                    )
+                )
+                return
+            text = _outcome.text
+            _burst_state["members"] = _outcome.member_ids
 
         # ── 3.5. Guruhda reklama/spam xabarni tozalash (ixtiyoriy) ─────
         # ⚠️ Do'kon egasi/xodim xabari HECH QACHON o'chirilmaydi — ular
@@ -912,6 +941,24 @@ def process_incoming_message(
             )
             return
 
+        # ── 4.6.4. Guruhda sotuvga aloqasiz xabarga JAVOB BERMASLIK ─────
+        # ⚠️ Jonli aniqlangan muammo (2026-10-25): guruhga "jhjjwc" yoki
+        # "zor ekan 😂" kabi ma'nosiz/sotuvga aloqasiz xabar yozilganda bot
+        # "tushunmadim"/"tashakkur" deb javob berdi. Prompt buni taqiqlagan,
+        # lekin AI ba'zan buzadi — shuning uchun AI umuman CHAQIRILMAYDI
+        # (token ham tejaladi). Xabar SKIPPED bo'ladi: AI tarixiga kirmaydi.
+        if is_group:
+            from apps.chat.group_filter import is_sales_relevant
+            if not is_sales_relevant(text, store):
+                logger.info(
+                    f"[Task] Guruhda sotuvga aloqasiz xabar — javob berilmadi | "
+                    f"store={store.name} | msg_id={message_id}"
+                )
+                ChatMessage.objects.filter(id=chat_message.id).update(
+                    processing_status=ChatMessage.ProcessingStatus.SKIPPED
+                )
+                return
+
         # ── 4.6.5. Bloklangan mijozni tekshirish ────────────────────────
         # ⚠️ XAVFSIZLIK: avval `is_blocked` bevosita HECH QAYERDA
         # tekshirilmas edi — bloklash faqat `toggle_block`ning yon
@@ -1345,7 +1392,7 @@ def process_incoming_message(
                         lead_data={
                             "full_name": _fallback_name,
                             "phone": _fallback_phone,
-                            "notes": "⚠️ AI javobi kesilib qolgani uchun zaxira (suhbat holati) orqali yaratildi.",
+                            "notes": "",   # izohni `create_lead_from_ai_data` mijoz xotirasi va xabarlaridan tuzadi
                             "course_name": _fallback_memory.get("goal", ""),
                             "preferred_time": _fallback_memory.get("preferred_day", ""),
                         },
@@ -1379,7 +1426,7 @@ def process_incoming_message(
                     platform_user_id=sender_id,
                 ).exclude(source_group_chat_id="").first()
                 if _src_session:
-                    _attribution = f"Manba: guruh (chat_id={_src_session.source_group_chat_id})"
+                    _attribution = "Manba: guruh"
                     if _src_session.source_context:
                         _attribution += f", mavzu: {_src_session.source_context}"
                     _final_lead.notes = (
@@ -1583,6 +1630,7 @@ def process_incoming_message(
     # (o'zgartirilmasdan) qayta ko'tariladi, Celery'ning o'zi to'g'ri
     # boshqaradi.
     except Retry:
+        _burst_state["flip"] = False
         raise
 
     except Exception as e:
@@ -1619,7 +1667,21 @@ def process_incoming_message(
 
         # Eksponensial backoff: 5s → 25s → 125s
         countdown = 5 ** (self.request.retries + 1)
+        _burst_state["flip"] = False
         raise self.retry(exc=e, countdown=countdown)
+
+    finally:
+        # Birlashtirilgan oldingi xabarlar endi suhbat tarixiga (AI uchun) kirishi mumkin.
+        if _burst_state["members"] and _burst_state["flip"]:
+            try:
+                from apps.chat.models import ChatMessage as _CM
+                _CM.all_objects.filter(
+                    store_id=store_id, platform=platform,
+                    message_id__in=_burst_state["members"],
+                    processing_status=_CM.ProcessingStatus.SKIPPED,
+                ).update(processing_status=_CM.ProcessingStatus.COMPLETED)
+            except Exception as _e:
+                logger.warning(f"[Task] Birlashtirilgan xabarlarni belgilab bo'lmadi: {_e}")
 
 
 # ─────────────────────────────────────────────────────────────

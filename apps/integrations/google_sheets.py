@@ -41,10 +41,29 @@ Joylashtirish > URL'ni nusxalab Sozlamalarga qo'yish):
 pastdagi `payload` maydonlari o'zgarsa ikkalasini ham yangilang.
 """
 import logging
+import re
 
 import httpx
 
 logger = logging.getLogger("apps.integrations.google_sheets")
+
+# ⚠️ XAVFSIZLIK (formula injection): Google Sheets'ga yozilgan matn "=", "+", "-", "@"
+# bilan boshlansa, jadval uni FORMULA deb hisoblaydi (masalan mijoz ismini
+# `=IMPORTXML(...)` deb yozishi mumkin). Bunday matn oldiga `'` qo'yiladi — Sheets
+# buni "oddiy matn" belgisi deb tushunadi va o'zi ko'rsatmaydi.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+# Oddiy raqamlar (telefon: "+998901234567") formula emas — tegilmaydi
+_PLAIN_NUMBER_RE = re.compile(r"^[+\-]?[\d\s().]+$")
+
+
+def spreadsheet_safe(value):
+    """Jadval formulasi sifatida ishlashi mumkin bo'lgan matnni xavfsizlantiradi."""
+    if not isinstance(value, str) or not value:
+        return value
+    if value[0] in _FORMULA_PREFIXES and not _PLAIN_NUMBER_RE.match(value):
+        return "'" + value
+    return value
+
 
 def push_lead_to_google_sheets(webhook_url: str, lead) -> bool:
     """
@@ -61,6 +80,13 @@ def push_lead_to_google_sheets(webhook_url: str, lead) -> bool:
         False — webhook sozlanmagan, tarmoq xatosi yoki skript xato qaytardi
     """
     if not webhook_url:
+        return False
+
+    # ⚠️ SSRF himoyasi: faqat `script.google.com/macros/...` (qayta tekshiriladi).
+    from apps.core.url_safety import is_safe_outbound_url
+
+    if not is_safe_outbound_url(webhook_url, google_script=True):
+        logger.error(f"[GoogleSheets] Xavfsiz bo'lmagan manzil — yuborilmadi | lid={lead.lead_number}")
         return False
 
     status_label = {"warm": "Iliq", "hot": "Issiq"}.get(lead.lead_status, "Aniqlanmagan")
@@ -81,6 +107,7 @@ def push_lead_to_google_sheets(webhook_url: str, lead) -> bool:
         "source": "LeadNode",
         "created_at": lead.created_at.strftime("%Y-%m-%d %H:%M"),
     }
+    payload = {key: spreadsheet_safe(value) for key, value in payload.items()}
 
     try:
         # ⚠️ Google Apps Script Web App'lari ko'pincha yakuniy javobdan

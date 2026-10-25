@@ -882,12 +882,193 @@ def _lead_from_customer_message(lead_data, history: list, customer, user_message
     built = {
         **contact,
         "lead_status": "warm",
-        "notes": "Mijoz ism va raqamni o'zi yozdi (AI lid blokini qaytarmagani uchun kod orqali aniqlandi).",
+        "notes": "",   # izohni `create_lead_from_ai_data` mijozning o'z ma'lumotlaridan tuzadi
         "course_name": getattr(product, "name", "") or "",
     }
     first_name = contact["full_name"].split()[0]
     logger.info(f"Mijoz kontaktini o'zi yozdi — lid kod orqali tuzildi | ism={first_name}")
     return built, CONTACT_RECEIVED_TEXT.format(name=first_name)
+
+
+# ⚠️ Jonli aniqlangan xato (2026-10-25): guruhda mijoz "dasturlash bormi?"
+# deb so'radi, bot esa GURUHNING O'ZIDA "ism-familiyangiz va telefon
+# raqamingizni qoldira olasizmi?" deb so'radi. Bu boshqa a'zolarga ochiq
+# ko'rinadi va ma'lumot maxfiyligiga zid. Guruhda faqat QISQA javob + havola.
+_GROUP_CONTACT_ASK_PATTERNS = (
+    r"ism[\s\-–—]*(?:va\s*)?familiya", r"telefon\s*raqam", r"raqamingiz", r"ismingiz",
+    r"familiyangiz", r"nomeringiz", r"qoldira\s+olasiz", r"qoldiring", r"kontakt\w*\s+(?:qoldir|ber)",
+    r"номер\s+телефона", r"оставьте",
+)
+# Mijoz ANIQ yozilmoqchi (issiq) — "Ro'yxatdan o'tish" havolasi beriladi
+_GROUP_ENROLL_PATTERNS = (
+    # Yozilish / ro'yxatdan o'tish
+    r"yozil\w*", r"yozdir\w*", r"yozib\s+(?:qo[’'`]?y|ber|ol)\w*", r"yozaqol\w*",
+    r"ro[’'`]?yxatdan\s+o[’'`]?t\w*", r"royxatdan\s+ot\w*", r"ro[’'`]?yxatga\s+ol\w*",
+    r"qatnash\w*", r"sotib\s+ol\w*", r"to[’'`]?lov\s+qil\w*", r"kursga\s+kir\w*", r"kursni\s+ol\w*",
+    # "o'qimoqchiman", "o'rganmoqchiman", "boshlamoqchiman", "kelmoqchiman" (urg'u qo'shimchalari bilan)
+    r"\b[ou][’'`]?qi\w*moqchi\w*", r"\b[ou][’'`]?rgan\w*moqchi\w*", r"\bboshla\w*moqchi\w*",
+    r"\b(?:kel|bor|qo[’'`]?shil)\w*moqchi\w*",
+    # "qabul qiling/qilinglar" (talab shakllari; "qabul qilasizmi?" — savol, hisobga olinmaydi)
+    r"qabul\s+qil(?:ing|inglar|sangiz|aylik)\w*",
+    # "o'qiyman", "kelaman", "boraman", "tayyorman", "roziman"
+    r"\b[ou][’'`]?qiyman\b", r"\b[ou][’'`]?rganaman\b", r"\bkelaman\b", r"\bboraman\b",
+    r"\bqo[’'`]?shilaman\b", r"\btayyorman\b", r"\broziman\b", r"qaror\s+qildim",
+    # Ruscha
+    r"запис\w*", r"хочу\s+(?:учить|пойти|начать|на)\w*",
+)
+
+
+# lead_score bo'yicha "YUQORI" daraja chegarasi — promptning o'zidagi CTA siyosati
+# bilan bir xil ("YUQORI (71-100)").
+_GROUP_HOT_LEAD_SCORE = 71
+_GROUP_HOT_INTENTS = {"purchase_intent", "registration_request"}
+_GROUP_HOT_STAGES = {"high_intent", "ready_to_convert"}
+_GROUP_HISTORY_LOOKBACK = 6   # mijozning oxirgi nechta xabari tekshiriladi
+
+
+def _matches_group_enrollment(text: str) -> bool:
+    lowered = (text or "").lower()
+    # Telegram klaviaturalari turli apostrof belgilari yuboradi (' ’ ‘ ʻ ʼ `) — bittaga keltiramiz
+    for ch in "’‘`ʻʼ":
+        lowered = lowered.replace(ch, "'")
+    return any(re.search(p, lowered) for p in _GROUP_ENROLL_PATTERNS)
+
+
+def _is_group_hot(user_message: str, history: list, customer, conversation_state) -> bool:
+    """
+    Guruhdagi mijoz "issiq"mi (ro'yxatdan o'tish havolasi beriladimi)? To'rt belgidan BIRI yetarli:
+
+      1. joriy xabarda yozilish niyati bor ("yozilmoqchiman", "o'qimoqchiman", "tayyorman" ...)
+      2. AI niyatni `purchase_intent`/`registration_request` deb baholagan
+      3. lead_score >= 71 (yoki bosqich high_intent/ready_to_convert) — AI baholagan yoki mijozda saqlangan
+      4. mijoz oxirgi xabarlarida shunday niyat bildirgan (masalan avval "yozilmoqchiman"
+         degan, endi "manzil qayer?" so'rayapti)
+
+    ⚠️ Avval faqat 1-belgiga qaralardi: mijoz "narxi qancha?" dedi, keyin "yaxshi, men
+    tayyorman" desa ham, yoki AI uni aniq "xarid niyati" deb baholasa ham oddiy havola chiqardi.
+    Qisqa va noaniq tasdiqlar ("ha", "mayli", "hop") hisobga olinmaydi — ular ko'pincha
+    shunchaki oldingi gapga javob (promptdagi (e) qoidasi).
+    """
+    state = conversation_state or {}
+
+    if _matches_group_enrollment(user_message):
+        return True
+
+    if str(state.get("intent", "")).strip().lower() in _GROUP_HOT_INTENTS:
+        return True
+
+    scores = []
+    for raw in (state.get("lead_score"), getattr(customer, "lead_score", None)):
+        try:
+            scores.append(int(raw))
+        except (TypeError, ValueError):
+            pass
+    if scores and max(scores) >= _GROUP_HOT_LEAD_SCORE:
+        return True
+
+    stages = {str(state.get("stage", "")).strip().lower(), str(getattr(customer, "conversation_stage", "")).strip().lower()}
+    if stages & _GROUP_HOT_STAGES:
+        return True
+
+    user_turns = [
+        " ".join((p.get("text", "") if isinstance(p, dict) else str(p)) for p in (turn.get("parts") or []))
+        for turn in (history or []) if turn.get("role") == "user"
+    ]
+    return any(_matches_group_enrollment(t) for t in user_turns[-_GROUP_HISTORY_LOOKBACK:])
+
+
+def _group_link_sentence(info_link: str, register_link: str, is_hot: bool) -> str:
+    """
+    Guruhdagi YAGONA havola jumlasi (do'kon egasining aniq iborasi, 2026-10-26):
+    "Shu havolaga kirib Start tugmasini bosib yubora olasizmi: [link] — u yerda to'liq ma'lumot beramiz."
+    ("Start tugmasi" — mijoz havolani bosganda Telegram botda chiqadigan tugma.)
+    """
+    if is_hot:
+        return f"Shu havolaga kirib Start tugmasini bosib yubora olasizmi: {register_link} — u yerda kursga yozilishingiz mumkin."
+    return f"Shu havolaga kirib Start tugmasini bosib yubora olasizmi: {info_link} — u yerda to'liq ma'lumot beramiz."
+
+
+def _force_group_link_reply(text: str, store, user_message: str, intent: str = "", is_hot=None) -> str:
+    """
+    Guruhdagi javob — har doim QISQA + HAVOLA. Bot guruhda konsultatsiya BERMAYDI.
+
+    ⚠️ Jonli aniqlangan xato (2026-10-25): mijoz guruhda "online formatdagi
+    kurslaringiz haqida ma'lumot kerak edi" deb yozdi. Bot guruhning o'zida
+    kurs nomlarini sanab ("Arab tili, Python Backend va Java Backend bor") va
+    "qaysi yo'nalish qiziq?" deb so'radi — havola esa yo'q edi. Do'kon egasining
+    ANIQ talabi: "guruhda savol-javob qilmasligi kerak, biz konsultatsiya
+    beradigan bot emasmiz" — faqat havola taklif qilinadi.
+
+    Prompt buni taqiqlagan, lekin AI ba'zan buzadi (kurs nomlari qisqartirib
+    yozilgani uchun nom-bo'yicha to'siqlar ham o'tkazib yuboradi). Shu sabab
+    AI matni BUTUNLAY almashtiriladi:
+      • oddiy savol  → "Shu havolaga kirib Start tugmasini bosib yubora olasizmi: [Batafsil ma'lumot olish] — u yerda to'liq ma'lumot beramiz."
+      • yozilmoqchi  → "Shu havolaga kirib Start tugmasini bosib yubora olasizmi: [Ro'yxatdan o'tish] — u yerda kursga yozilishingiz mumkin."
+    Istisno: AI `positive_feedback` deb belgilagan (minnatdorchilik) javobi o'z
+    holicha qoladi (faqat savol jumlalari olib tashlanadi).
+    """
+    if not text:
+        return text
+
+    if (intent or "").strip().lower() == "positive_feedback":
+        kept = [
+            s for s in re.split(r"(?<=[.!?…])\s+|\n+", text)
+            if s.strip() and not s.rstrip().endswith("?")
+        ]
+        return " ".join(kept).strip() or text
+
+    info_link, register_link = _build_dm_links(store)
+    lowered = (user_message or "").lower()
+    if is_hot is None:   # chaqiruvchi hal qilmagan bo'lsa — faqat joriy xabarga qaraymiz
+        is_hot = _matches_group_enrollment(user_message)
+
+    greeting = ""
+    if re.search(r"assalom", lowered):
+        greeting = "Vaalaykum assalom! 😊 "
+    elif re.search(r"\bsalom\b|привет|здравств", lowered):
+        greeting = "Salom! 😊 "
+
+    tail = _group_link_sentence(info_link, register_link, is_hot)
+    result = f"{greeting}{tail}"
+    if result != text:
+        logger.info(f"[Guruh] Javob qisqa havola bilan almashtirildi | hot={is_hot} | do'kon={getattr(store, 'name', '?')}")
+    return result
+
+
+def _scrub_group_contact_ask(text: str, store, user_message: str) -> str:
+    """
+    Guruh javobida ism/telefon so'ralgan bo'lsa — o'sha jumla olib tashlanadi
+    va o'rniga havola qo'yiladi:
+      • oddiy savol  → "Shu havolaga kirib Start tugmasini bosib yubora olasizmi: [Batafsil ma'lumot olish] — u yerda to'liq ma'lumot beramiz."
+      • yozilmoqchi  → "Shu havolaga kirib Start tugmasini bosib yubora olasizmi: [Ro'yxatdan o'tish] — u yerda kursga yozilishingiz mumkin."
+    Aniqlashtiruvchi savollar ham (guruhda taqiqlangan) olib tashlanadi.
+    """
+    if not text:
+        return text
+    lowered = text.lower()
+    if not any(re.search(p, lowered) for p in _GROUP_CONTACT_ASK_PATTERNS):
+        return text
+
+    info_link, register_link = _build_dm_links(store)
+    is_hot = _matches_group_enrollment(user_message)
+
+    # Jumla chegarasi: nuqta/?/! YOKI emoji ("... bor 😊 To'liqroq ma'lumot ...")
+    sentences = [
+        s.strip() for s in re.split(r"(?<=[.!?…\U0001F300-\U0001FAFF\u2600-\u27BF])\s+|\n+", text)
+        if s.strip()
+    ]
+    kept = [
+        s for s in sentences
+        if not any(re.search(p, s.lower()) for p in _GROUP_CONTACT_ASK_PATTERNS)
+        and not s.rstrip().endswith("?")
+    ]
+    body = " ".join(kept).strip()
+
+    if "start=" not in body and "href=" not in body:
+        body = f"{body} {_group_link_sentence(info_link, register_link, is_hot)}".strip()
+
+    logger.info(f"[Guruh] Javobdagi kontakt so'rovi havolaga almashtirildi | hot={is_hot} | do'kon={getattr(store, 'name', '?')}")
+    return body
 
 
 def _handle_phone_in_message(text: str, customer, has_lead: bool, user_message: str) -> str:
@@ -1296,6 +1477,31 @@ _DECLINE_PATTERNS = (
 )
 
 
+# ⚠️ Jonli aniqlangan xato (2026-10-24): bot kontakt so'ragach, mijoz
+# 5 marta ketma-ket "kurs haqida ma'lumot tashlab bering", "ma'lumot
+# beraqoling", "narxni yubor", "nomerim yo'q" dedi — ya'ni kontakt
+# BERMASDAN ma'lumotni QAYTA-QAYTA so'radi. Bu — aniq "shu yerda ayting"
+# bilan bir xil, lekin tizim buni rad deb hisoblamadi va skriptni 5 marta
+# to'sdi. Kontaktni e'tiborsiz qoldirib, ma'lumotni talab qilish ham rad.
+_INFO_WORDS = r"(?:ma[’'`]?lumot\w*|narx\w*|dastur\w*|jadval\w*|hammasi\w*|script\w*|to[’'`]?liq\w*)"
+_GIVE_VERBS = (
+    r"(?:ber(?:ing|sangiz|sez|ib)?|bera\s*qol\w*|beraqol\w*|yubor\w*|tashla\w*|tahsla\w*|"
+    r"ayt\w*|yoz\w*|ko[’'`]?rsat\w*|tushuntir\w*|jo[’'`]?nat\w*|kerak(?!\s*emas))"
+)
+_INFO_INSISTENCE_PATTERNS = (
+    # "ma'lumot beraqoling", "narxni tashlab bera qol", "narxi bolsa yuborib qoyavering"
+    rf"\b{_INFO_WORDS}.{{0,30}}\b{_GIVE_VERBS}",
+    # "bering ma'lumotni", "ayting narxini"
+    rf"\b{_GIVE_VERBS}.{{0,25}}\b{_INFO_WORDS}",
+    # Qisqa buyruq: "beraqol", "yuboring", "ayting"
+    r"^\s*(?:ber(?:ing|sangiz)?|beraqol\w*|bera\s*qol\w*|tashlab\s+ber\w*|yubor\w*|ayt\w*|tushuntir\w*)\s*$",
+    # Bitta so'z: "ma'lumot", "narx"
+    r"^\s*(?:ma[’'`]?lumot|narx\w*|dastur|jadval|script|hammasi)\s*$",
+    # "nomerim yo'q", "raqamim yo'q" — kontakt bera olmaydi
+    r"\b(?:nomer|raqam|telefon)\w*\s+yo[’'`]?q\b",
+)
+
+
 def _customer_declined_contact(history: list, current_message: str = "") -> bool:
     """
     Mijozning SO'NGGI xabari kontakt berishdan bosh tortish/talab
@@ -1336,7 +1542,12 @@ def _customer_declined_contact(history: list, current_message: str = "") -> bool
         return False
 
     lowered = last_user_text.lower()
-    return any(re.search(pattern, lowered) for pattern in _DECLINE_PATTERNS)
+    if any(re.search(pattern, lowered) for pattern in _DECLINE_PATTERNS):
+        return True
+    # Savol belgisi bor xabar — haqiqiy savol ("narxi qancha?"), talab emas.
+    if "?" in lowered:
+        return False
+    return any(re.search(pattern, lowered) for pattern in _INFO_INSISTENCE_PATTERNS)
 
 
 def _build_full_info_response(
@@ -1446,7 +1657,7 @@ def _scrub_leaked_reasoning(text: str, store, is_group: bool) -> str:
     )
     if is_group:
         dm_link_display, _ = _build_dm_links(store)
-        return f"Assalomu alaykum! 😊 Batafsil ma'lumot olish uchun shu yerda yozishingiz mumkin: {dm_link_display}"
+        return f"Assalomu alaykum! 😊 Shu havolaga kirib Start tugmasini bosib yubora olasizmi: {dm_link_display} — u yerda to'liq ma'lumot beramiz."
     return "Bu haqida mutaxassislarimiz siz bilan tez orada bog'lanishadi. Iltimos, <b>ism-familiyangiz va telefon raqamingizni</b> qoldira olasizmi?"
 
 
@@ -1688,7 +1899,8 @@ Siz bilan muloqot qilayotgan inson ushbu do'konning HAKIQIY EGASI (Biznes Rahbar
    (e) MUHIM — HAVOLANI FAQAT ANIQ XOHISH BO'LGANDA YUBORING: bu havolani mijoz chindan ham ro'yxatdan o'tmoqchi/yozilmoqchi ekanini ANIQ va bir ma'noda bildirganda yuboring (masalan "ro'yxatdan o'tkazing", "yozilaman", "qanday yozilsam bo'ladi" kabi). "Hop", "mayli", "ha", "ok" kabi QISQA VA NOANIQ javoblarni AVTOMATIK "ro'yxatdan o'tishga rozi" deb hisoblamang — bular ko'pincha shunchaki oldingi gapga oddiy tasdiq bo'ladi, ro'yxatdan o'tishga rozilik emas. Bunday noaniq holatda havola yubormasdan, aniqlashtiruvchi savol bering (masalan "Ro'yxatdan o'tkazib qo'yaymi?") va mijoz ANIQ "ha" deb tasdiqlagandan keyingina havolani yuboring. Bu juda muhim: guruhda yuzlab odam bo'lishi mumkin, noto'g'ri talqin qilib har kimga tasodifan ro'yxatdan o'tish havolasi otib yuborish chalkashlik va ishonchsizlik keltirib chiqaradi.
    (f) Shu sababli guruh xabaridan HECH QACHON lid JSON blokini (ism/telefon maydonlari bilan) yaratmang — bu faqat shaxsiy chatda, mijoz o'zi ma'lumot bergandan keyingina qilinadi.
    (g) MUHIM — O'QUVCHI/MIJOZ IJOBIY FIKR-MULOHAZA BILDIRSA (masalan kursni/o'qituvchini/xizmatni maqtasa, "rahmat" desa, o'qiyotganidan yoki natijasidan mamnunligini bildirsa) — bu HAQIQIY SAVOL emas, shuning uchun yuqoridagi (b) banddagi kabi NO_REPLY QAYTARMANG, lekin sotuv taklifiga ham AYLANTIRMANG: iliq, qisqa minnatdorchilik bilan javob bering, hech qanday havola yoki taklif QO'SHMANG — masalan "Rahmat 😊 Sizga yoqqanidan xursandmiz!" yoki "Juda xursandmiz, fikringiz uchun rahmat 😊". Bu — samimiy javob, reklama imkoniyati emas. Javobingiz oxiridagi (mijozga ko'rinmaydigan) suhbat holati blokida "intent"ni AYNAN "positive_feedback" deb belgilang — tizim shu orqali bitta mijozga BIR NECHA marta ketma-ket minnatdorchilik bildirsa ham, javobni takrorlab guruhni "band" qilib qo'ymaydi.
-   (h) MUHIM — O'QUVCHI/MIJOZ ULANGAN BIZNES (kurs/o'qituvchi/xizmat sifati)dan ANIQ NOROZILIGINI YOKI SHIKOYATINI bildirsa (masalan "o'qituvchi darsni yaxshi tushuntirmaydi", "pulimni qaytaring", "xizmat sifati yomon edi") — buni HECH QACHON e'tiborsiz qoldirmang (NO_REPLY emas) va HECH QACHON guruhning o'zida oqlanish/bahslashish/yechim taklif qilishga urinmang (bu boshqa a'zolar oldida noqulay tortishuvga aylanib ketishi mumkin). Buning o'rniga qisqa, samimiy tan olish bilan javob bering va shaxsiy chatga taklif qiling, masalan: "Buni eshitib afsuslandim 😔 Batafsilroq gaplashib, yechim topishga harakat qilaylik: {dm_link_display}" Javobingiz oxiridagi suhbat holati blokida "intent"ni "complaint" deb va "human_handoff"ni "true" deb belgilang — do'kon egasi bu haqda darhol xabardor bo'lishi kerak."""
+   (h) MUHIM — O'QUVCHI/MIJOZ ULANGAN BIZNES (kurs/o'qituvchi/xizmat sifati)dan NOROZILIGINI YOKI SHIKOYATINI bildirsa (masalan "o'qituvchi darsni yaxshi tushuntirmaydi", "pulimni qaytaring", "xizmat sifati yomon edi") — GURUHDA HECH QANDAY JAVOB YOZMANG: aynan "NO_REPLY" so'zini qaytaring (oqlanish, bahslashish, yechim taklif qilish yoki shaxsiy chatga chaqirish ham TAQIQLANADI — bu boshqa a'zolar oldida noqulay tortishuvga aylanadi). Do'kon egasining ANIQ qarori: guruhda bunday gaplarga bot jim turadi. Agar xabarda shikoyat bilan birga ANIQ savol ham bo'lsa (narx, manzil, yozilish), faqat o'sha savolga qisqa javob bering — shikoyat qismiga e'tibor bermang.
+"""
         if is_group else ""
     )
 
@@ -2520,6 +2732,12 @@ def _call_gemini(store, customer, user_message: str, model_name: str = "gemini-3
     # narx/muddat/vaqt raqamini guruhning o'zida ochib qo'yishi mumkin.
     # Bu yerda shunday jumlalar aniqlanib, havola bilan almashtiriladi.
     if is_group:
+        clean_text = _force_group_link_reply(
+            clean_text, store, user_message,
+            intent=(conversation_state or {}).get("intent", ""),
+            is_hot=_is_group_hot(user_message, history, customer, conversation_state),
+        )
+        clean_text = _scrub_group_contact_ask(clean_text, store, user_message)
         clean_text = _scrub_group_course_listing(clean_text, store)
         clean_text = _scrub_group_numbers(clean_text, store)
     else:

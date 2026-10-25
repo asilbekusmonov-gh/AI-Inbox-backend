@@ -229,6 +229,69 @@ def extract_contact_from_message(message: str) -> Optional[dict]:
     return {"full_name": name, "phone": phone}
 
 
+# Mijoz xotirasidagi (AI kuzatgan) maydonlar -> operator uchun tushunarli yorliqlar
+_NOTE_MEMORY_LABELS = (
+    ("goal", "Maqsadi"),
+    ("experience_level", "Hozirgi darajasi"),
+    ("preferred_schedule", "Qulay vaqt"),
+    ("preferred_day", "Qulay kun"),
+    ("budget_concern", "Narx haqida"),
+    ("objections", "E'tirozi"),
+)
+_NOTE_MAX_CUSTOMER_MESSAGES = 3
+_NOTE_MESSAGE_MAX_LEN = 110
+
+
+def compose_lead_notes(*, customer, memory: Optional[dict] = None, product_name: str = "",
+                       exclude_text: str = "") -> str:
+    """
+    Operator uchun izohni AI'siz, mijozning O'Z ma'lumotlaridan tuzadi:
+    qiziqqan kurs, maqsad/daraja/vaqt (AI kuzatgan xotira) va mijozning o'z so'zlari.
+
+    ⚠️ Nega kerak: AI lid blokida `notes` ni bo'sh qoldirsa yoki lidni KOD o'zi
+    tuzgan bo'lsa (AI blokni qaytarmaganda), izohga "kod orqali aniqlandi" kabi ichki
+    texnik matn tushardi — operator uchun foydasiz. Bu yerda HECH NARSA o'ylab
+    topilmaydi: faqat mijoz aytgan yoki AI xotirasiga yozgan narsa ishlatiladi.
+    """
+    parts = []
+    if product_name:
+        parts.append(f"Qiziqqan kurs: {product_name}.")
+
+    merged_memory = {**(getattr(customer, "conversation_memory", None) or {}), **(memory or {})}
+    for key, label in _NOTE_MEMORY_LABELS:
+        value = merged_memory.get(key)
+        if isinstance(value, (list, tuple)):
+            value = ", ".join(str(v) for v in value if v)
+        value = str(value or "").strip()
+        if value:
+            parts.append(f"{label}: {value}.")
+
+    # Mijozning o'z so'zlari (buyruqlar, qisqa tasdiqlar va kontakt xabarining o'zi chiqarib tashlanadi)
+    try:
+        from apps.chat.models import ChatMessage
+
+        recent = ChatMessage.all_objects.filter(
+            customer=customer, role=ChatMessage.Role.USER,
+        ).order_by("-created_at")[:12]
+        said = []
+        for msg in reversed(list(recent)):
+            text = " ".join((msg.content or "").split())
+            if (
+                not text or text.startswith("/") or len(text) < 8
+                or (exclude_text and text == " ".join(exclude_text.split()))
+                or find_phone_candidate(text)
+            ):
+                continue
+            said.append(text[:_NOTE_MESSAGE_MAX_LEN].rstrip() + ("…" if len(text) > _NOTE_MESSAGE_MAX_LEN else ""))
+        said = said[-_NOTE_MAX_CUSTOMER_MESSAGES:]
+        if said:
+            parts.append("Mijoz yozgan: " + "; ".join(f"«{s}»" for s in said) + ".")
+    except Exception:
+        logger.warning("Lid izohi uchun mijoz xabarlarini o'qib bo'lmadi", exc_info=True)
+
+    return " ".join(parts) if parts else "Aniq sabab aytilmadi."
+
+
 def _validate_full_name(raw_name: str) -> tuple[Optional[str], Optional[str]]:
     """
     Ism-familiyani DETERMINISTIK tekshiradi va ortiqcha bo'shliqlardan
@@ -340,6 +403,15 @@ def create_lead_from_ai_data(
             lead_status = Lead.LeadStatus.WARM
         elif lead_status not in (Lead.LeadStatus.WARM, Lead.LeadStatus.HOT):
             lead_status = Lead.LeadStatus.UNQUALIFIED
+
+        # ⚠️ Izoh HECH QACHON bo'sh yoki ichki-texnik matn bo'lmasligi kerak (qarang:
+        # `compose_lead_notes`). AI yozgan izoh bor bo'lsa — o'sha qoladi.
+        if not notes:
+            notes = compose_lead_notes(
+                customer=customer, memory=None,
+                product_name=getattr(interested_course, "name", "") or "",
+                exclude_text="",
+            )
 
         recent_duplicate = Lead.objects.filter(
             store=store, customer=customer, is_deleted=False,

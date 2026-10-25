@@ -189,8 +189,25 @@ class StoreConfigUpdateSerializer(serializers.ModelSerializer):
         value = (value or "").strip()
         if not value:
             return value
+        # (SSRF himoyasi `validate_bitrix24_webhook` ichida — ichki manzilga so'rov yuborilmaydi)
         from apps.integrations.bitrix import validate_bitrix24_webhook
         is_valid, error_message = validate_bitrix24_webhook(value)
+        if not is_valid:
+            raise serializers.ValidationError(error_message)
+        return value
+
+
+    def validate_google_sheets_webhook_url(self, value):
+        """
+        ⚠️ Avval bu maydon umuman tekshirilmasdi (faqat uzunlik) — istalgan matn (jumladan ichki
+        manzil) "ULANGAN" bo'lib saqlanardi va lidlar jimgina yetib bormasdi. Endi faqat
+        `https://script.google.com/macros/s/.../exec` ko'rinishidagi manzil qabul qilinadi.
+        """
+        value = (value or "").strip()
+        if not value:
+            return value
+        from apps.core.url_safety import validate_outbound_url
+        is_valid, error_message = validate_outbound_url(value, google_script=True)
         if not is_valid:
             raise serializers.ValidationError(error_message)
         return value

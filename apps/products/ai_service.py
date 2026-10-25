@@ -262,7 +262,6 @@ def analyze_product_file(
     # ob'ektining o'zini yuborish (tasdiqlandi: ~11 soniyada, to'g'ri natija
     # bilan). Matn uchun esa umuman "blob" kerak emas — to'g'ridan-to'g'ri
     # promptga qo'shiladi, bu ham tezroq va ishonchliroq.
-    uploaded_file = None  # faqat PDF yo'lida ishlatiladi, javobdan keyin tozalanadi
     # ⚠️ Matnli fayllar uchun to'liq matn AI'dan EMAS, to'g'ridan-to'g'ri
     # fayldan olinadi (pastda natijaga yoziladi) — AI uni qayta terib
     # chiqishiga yo'l qo'ymaymiz: matn mijozga AYNAN shu holatda
@@ -283,29 +282,27 @@ def analyze_product_file(
         raw_file_text = file_text.strip()
         contents = [f"{prompt}\n\nFayl matni:\n{file_text}"]
     else:
-        # application/pdf — Gemini File API orqali yuklanadi (SDK'ning
-        # katta/hujjat fayllar uchun rasmiy tavsiya qilingan yo'li).
-        # ⚠️ Yuklangan fayl javob OLINGUNCHA o'chirilmasligi kerak — shu
-        # sabab tozalash pastda, `generate_content` dan KEYIN, `finally`da.
-        import tempfile
+        # application/pdf — so'rovning ichiga to'g'ridan-to'g'ri (inline) joylanadi.
+        # ⚠️ Jonli aniqlangan xato (2026-10-24): avval PDF Gemini "File API"
+        # (`genai.upload_file`) orqali yuklanardi. Bu yo'l alohida
+        # `$discovery` so'rovi yuboradi va joriy API kalitini "API key not
+        # valid" deb RAD ETADI — garchi oddiy suhbat so'rovlari shu kalit
+        # bilan ishlasa ham. Natijada PDF bilan kurs qo'shish 502 berardi.
+        # Inline yo'l esa shu kalit bilan ishlaydi (jonli sinaldi: ~3 soniya)
+        # va vaqtinchalik fayl yuklab/o'chirib o'tirmaslikni ham talab qilmaydi.
+        # Cheklov: so'rov 20 MB dan oshmasligi kerak (view'da fayl 10 MB bilan
+        # cheklangan, shuning uchun xavfsiz).
+        contents = [
+            genai.protos.Part(
+                inline_data=genai.protos.Blob(mime_type=mime_type, data=file_bytes)
+            ),
+            prompt,
+        ]
 
-        with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
-            tmp.write(file_bytes)
-            tmp.flush()
-            uploaded_file = genai.upload_file(path=tmp.name, mime_type=mime_type)
-        contents = [uploaded_file, prompt]
-
-    try:
-        # ⚠️ Rasm/PDF tahlili matnli so'rovlarga qaraganda sezilarli sekinroq
-        # va vaqti beqaror (jonli testda 11s dan 40s gacha o'zgardi) — shu
-        # sabab boshqa Gemini chaqiruvlaridan (odatda 25s) kattaroq muhlat.
-        response = model.generate_content(contents, request_options={"timeout": 60})
-    finally:
-        if uploaded_file is not None:
-            try:
-                genai.delete_file(uploaded_file.name)
-            except Exception:
-                pass
+    # ⚠️ Rasm/PDF tahlili matnli so'rovlarga qaraganda sezilarli sekinroq
+    # va vaqti beqaror (jonli testda 11s dan 40s gacha o'zgardi) — shu
+    # sabab boshqa Gemini chaqiruvlaridan (odatda 25s) kattaroq muhlat.
+    response = model.generate_content(contents, request_options={"timeout": 60})
 
     text = (response.text or "").strip()
     if not text:

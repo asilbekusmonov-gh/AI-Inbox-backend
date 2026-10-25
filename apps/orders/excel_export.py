@@ -59,7 +59,14 @@ def build_leads_workbook(leads) -> BytesIO:
     for row_idx, lead in enumerate(leads, start=2):
         values = _row_values(lead)
         for col_idx, (_header, key, _width) in enumerate(COLUMNS, start=1):
-            ws.cell(row=row_idx, column=col_idx, value=values[key])
+            cell = ws.cell(row=row_idx, column=col_idx, value=values[key])
+            # ⚠️ XAVFSIZLIK (formula injection): mijoz ismi/izohi tashqaridan keladi.
+            # openpyxl "=" bilan boshlanadigan matnni avtomatik FORMULA deb saqlaydi
+            # (masalan `=HYPERLINK("http://...","Bosing")`), ega faylni ochganda u ishga
+            # tushadi. Hamma matnli katak majburan MATN turiga o'tkaziladi — Excel uni
+            # hech qachon hisoblamaydi, faqat ko'rsatadi.
+            if isinstance(values[key], str):
+                cell.data_type = "s"
 
     ws.freeze_panes = "A2"
 

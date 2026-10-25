@@ -169,7 +169,13 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "Asia/Tashkent"
 CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_ALWAYS_EAGER = DEBUG  # Dev rejimida 0-soniyali tezkor (instant) ijro
+# ⚠️ Standart: DEBUG rejimida tasklar navbatsiz, web jarayonining ICHIDA
+# (sinxron) bajariladi. Bunda `countdown` (masalan, ketma-ket xabarlarni
+# birlashtirish uchun 2 soniya kutish — apps/webhooks/burst.py) e'tiborga
+# olinmaydi va web so'rovi AI javobi tugaguncha band turadi. Haqiqiy
+# (production) xatti-harakatni sinash uchun .env da CELERY_TASK_ALWAYS_EAGER=False
+# qo'ying — tasklar worker orqali, navbat bilan ishlaydi.
+CELERY_TASK_ALWAYS_EAGER = env("CELERY_TASK_ALWAYS_EAGER", default=str(DEBUG)).lower() == "true"
 CELERY_TASK_TIME_LIMIT = 60 * 5          # Task max 5 daqiqa ishlaydi
 CELERY_TASK_SOFT_TIME_LIMIT = 60 * 4     # 4 daqiqada ogohlantirish
 
@@ -424,6 +430,12 @@ CHAT_MESSAGE_RETENTION_DAYS = int(env("CHAT_MESSAGE_RETENTION_DAYS", default="90
 # bo'lsa shu ikkita raqamni bu yerda o'zgartirish kifoya — boshqa hech
 # qanday kodga tegish shart emas.
 BROADCAST_DAILY_LIMIT_PER_STORE = int(env("BROADCAST_DAILY_LIMIT_PER_STORE", default="1"))
+
+# Mijoz ketma-ket yozgan xabarlarni birlashtirish uchun kutish oynasi (soniya).
+# Mijoz shu vaqt ichida yana yozsa, bot to'xtab turib hammasini birga o'qiydi va
+# BITTA javob beradi. 0 — o'chirilgan (har xabarga darrov alohida javob).
+# Qarang: apps/webhooks/burst.py
+MESSAGE_BURST_WINDOW_SECONDS = int(env("MESSAGE_BURST_WINDOW_SECONDS", default="2"))
 BROADCAST_WEEKLY_LIMIT_PER_STORE = int(env("BROADCAST_WEEKLY_LIMIT_PER_STORE", default="3"))
 
 

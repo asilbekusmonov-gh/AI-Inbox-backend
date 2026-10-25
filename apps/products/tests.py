@@ -279,3 +279,46 @@ class SearchForAiSmallCatalogNoFilterTestCase(TestCase):
         results = Product.search_for_ai(self.store, "Python backend", limit=5)
         names = {p.name for p in results}
         self.assertIn("Python Backend Development", names)
+
+
+class AnalyzePdfInlineTestCase(TestCase):
+    """
+    ⚠️ Jonli aniqlangan xato (2026-10-24): PDF bilan kurs qo'shish 502 berdi.
+    PDF Gemini "File API" (`genai.upload_file`) orqali yuklanardi, u esa joriy
+    API kalitini "API key not valid" deb rad etardi (suhbat so'rovlari shu
+    kalit bilan ishlasa ham). Endi PDF so'rov ichiga inline joylanadi.
+    """
+
+    def _run(self):
+        from unittest.mock import MagicMock
+        from apps.products import ai_service
+
+        response = MagicMock()
+        response.text = (
+            '{"name": "Arab tili", "price": 500000, "description": "Boshlang\'ich kurs", '
+            '"full_text": "To\'liq matn", "custom_fields": []}'
+        )
+        fake_model = MagicMock()
+        fake_model.generate_content.return_value = response
+
+        with patch.object(ai_service.genai, "upload_file") as mock_upload, \
+             patch.object(ai_service.genai, "GenerativeModel", return_value=fake_model), \
+             patch.object(ai_service.genai, "configure"):
+            result = ai_service.analyze_product_file(
+                file_bytes=b"%PDF-1.4 fake", mime_type="application/pdf",
+                category_type="education", name="", price=None,
+            )
+        return result, fake_model, mock_upload
+
+    def test_pdf_does_not_use_file_api(self):
+        _result, _model, mock_upload = self._run()
+        mock_upload.assert_not_called()
+
+    def test_pdf_is_sent_inline_with_correct_mime_type(self):
+        result, model, _upload = self._run()
+
+        contents = model.generate_content.call_args.args[0]
+        blob = contents[0].inline_data
+        self.assertEqual(blob.mime_type, "application/pdf")
+        self.assertEqual(blob.data, b"%PDF-1.4 fake")
+        self.assertEqual(result["name"], "Arab tili")
