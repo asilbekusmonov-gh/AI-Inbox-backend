@@ -203,7 +203,7 @@ _LEAD_QUALIFICATION_RULE = """
   • "warm" va "hot" orasida ikkilansangiz — har doim "warm"ni tanlang (past baho xavfsizroq).
 - MUHIM — "notes" MAYDONI MAJBURIY VA BATAFSIL BO'LSIN (shunchaki "ixtiyoriy izoh" emas!): bu — do'kon egasi/mutaxassisning mijozga qo'ng'iroq qilishdan OLDIN o'qiydigan YAGONA xulosa, shuning uchun mutaxassis suhbatning o'zini (xom yozishma tarixini) o'qimasdan ham mijoz haqida YETARLICHA to'liq tasavvurga ega bo'lishi kerak — bu shunchaki bitta qisqa jumla emas, balki 2-4 gapli, quyidagilarni qamrab oluvchi tavsif bo'lsin (suhbatda aytilgan bo'lsa): mijozning aniq maqsadi/sababi, hozirgi darajasi yoki holati, muddat yoki vaqt bo'yicha aytgan gaplari, narx/byudjet haqida bildirgan fikri yoki e'tirozi, va agar biror aniq shart/talab qo'ygan bo'lsa (masalan faqat kechqurun, faqat online). Masalan: "IELTS'dan 7.0 ball olishni maqsad qilgan, hozir o'rta darajada, 2 oy ichida tayyorlanmoqchi. Narx haqida so'radi, lekin e'tiroz bildirmadi. Faqat kechqurun vaqtlar qulay ekanligini aytdi." Xom "Mijoz: ... / AI: ..." shaklidagi suhbat tarixini AYNAN takrorlamang — buni o'zingiz tahlil qilib, tabiiy matn shaklida yozing. Agar suhbatda bunday tafsilotlar aytilmagan bo'lsa, "Aniq sabab aytilmadi" deb yozing — HECH QACHON bo'sh qoldirmang.
 - MUHIM — "notes" FAQAT HAQIQIY MANBADAN: bu yerga FAQAT mijozning o'zi suhbatda aniq aytgan narsalarni, yoki yuqoridagi katalog/"Ishonchli Biznes Ma'lumotlari"da tasdiqlangan faktlarni yozing. Mijoz aytmagan taxmin, baho yoki tafsilotni ("ehtimol byudjeti past", "shoshilinch ko'rinadi" kabi o'zingizdan xulosa) "notes"ga O'YLAB TOPIB QO'SHMANG — mutaxassis buni mijozning O'Z so'zi deb o'qiydi.
-- MUHIM — TELEFON RAQAMI NOTO'G'RI BO'LSA, JAVOB QISQA VA QURUQ BO'LSIN (do'kon egasining talabi, 2026-10-18): mijoz raqamni xato yoki chala yozsa, "Rahmat, Asilbek! Telefon raqamingizni to'liqroq yozib yubora olasizmi?" kabi iliq kirish so'zlari va uzun iboralar KERAK EMAS. Faqat nima xato ekanini va nima qilish kerakligini ayting: "Telefon raqami noto'g'ri ko'rinmoqda. Iltimos, qaytadan tekshirib yuboring (masalan: +998 90 123 45 67)." ⚠️ To'g'ri formatlar: 9 xonali milliy raqam (901234567) yoki xalqaro kod bilan (+998901234567). Boshqa uzunlikdagi raqam — xato.
+- MUHIM — TELEFON RAQAMI NOTO'G'RI BO'LSA, JAVOB QISQA VA QURUQ BO'LSIN (do'kon egasining talabi, 2026-10-18): mijoz raqamni xato yoki chala yozsa, "Rahmat, Asilbek! Telefon raqamingizni to'liqroq yozib yubora olasizmi?" kabi iliq kirish so'zlari va uzun iboralar KERAK EMAS. Faqat nima xato ekanini va nima qilish kerakligini ayting: "Telefon raqami noto'g'ri ko'rinmoqda. Iltimos, qaytadan tekshirib yuboring (masalan: +998 90 123 45 67)." ⚠️ To'g'ri formatlar: 9 xonali milliy raqam (901234567) yoki xalqaro kod bilan (+998901234567). Rossiya va Qozog'iston raqami (+7 916 123 45 67 yoki 8 916 123 45 67), Qirg'iziston raqami (+996 555 123 456) ham TO'G'RI — ularni "noto'g'ri" DEMANG, aynan mijoz yozganidek "phone" maydoniga yozing (tizim o'zi tekshiradi va operatorga Telegram orqali bog'lanishni eslatadi). Boshqa uzunlikdagi raqam — xato.
 - MUHIM — ISM/TELEFON QISMAN BERILSA, FAQAT YETISHMAGANINI SO'RANG: agar mijoz FAQAT ismini bergan bo'lsa (telefonsiz), javobingizda FAQAT telefon raqamini so'rang — ismni qayta so'ramang. Agar FAQAT telefon raqamini bergan bo'lsa (ismsiz), FAQAT ismini so'rang. Agar ikkalasini ham BITTA xabarda, norasmiy formatda bergan bo'lsa (masalan "Golibjon +998901234567" yoki "Aziz, 901234567"), buni aqlli tarzda ism+telefon sifatida tanib oling — ikkalasi ham aniq bo'lsa, qayta hech narsa so'ramang, to'g'ridan-to'g'ri lid JSON'ini yarating.
 - MUHIM — NORASMIY ISMNI MAJBURAN RASMIYLASHTIRMANG: mijoz faqat ism bersa, familiyasini SO'RASH mumkin (majburiy emas, ixtiyoriy) — lekin mijoz "G'ani aka" kabi norasmiy ism/murojaat ishlatsa, buni qayta-qayta "to'liq ism-familiya" talab qilib qistamang — shu nom bilan davom eting, bu yetarli.
 - MUHIM — KONTAKT SO'RASHNI ZERIKARLI/MAJBURIY QILMANG (⚠️ bu qoida FAQAT mijoz yuqoridagi "1a" qoidasi bo'yicha ANIQ rad javobini bergandan KEYIN yoki ism+telefon allaqachon olingandan KEYIN qo'llanadi): o'sha holatda, mijoz ketma-ket bir nechta boshqa savol bersa (narx, muddat, jadval va h.k.), har bir javobdan keyin bir xil kontakt so'rovini QAYTA-QAYTA takrorlamang — savollariga tabiiy javob bering. ⚠️ LEKIN mijoz HALI rad javobi bermagan bo'lsa (ya'ni bu suhbatda birinchi marta ANIQ savol so'rayotgan bo'lsa) — "1a" qoidasiga ko'ra, javob o'rniga kontakt taklif qilish NAGGING emas, bu — standart, kutilgan birinchi javob.
@@ -460,16 +460,29 @@ def _count_contact_pushes_after_script(history: list) -> int:
     return count
 
 
+# ⚠️ Jonli aniqlangan muammo (2026-10-28): mijoz ism va raqamini berdi, keyin "endi ma'lumotni
+# bering", "kurs haqida ma'lumot bermaysizlarmi?", "nega ma'lumot bermaysizlar" deb 4 marta
+# so'radi — bot har safar AYNAN bir xil "mutaxassislarimiz bog'lanadi" deb javob berdi
+# (promptdagi "ro'yxatdan o'tgandan keyin narx/tafsilotni bermang" qoidasi). Mijoz kontaktini
+# bergan, endi ma'lumotni kutadi: shu holatda kursning saqlangan to'liq matni BIR MARTA yuboriladi.
+_POST_REGISTRATION_TAIL = (
+    "Mutaxassislarimiz ham tez orada siz bilan bog'lanib, qolgan savollaringizga javob berishadi 😊"
+)
+_POST_REG_SENT_MARKER = "qolgan savollaringizga javob berishadi"
+
+
 def _full_info_already_sent(history: list) -> bool:
     """Suhbatda kursning to'liq skripti allaqachon yuborilganmi?"""
     for turn in history or []:
         if turn.get("role") != "model":
             continue
         for part in turn.get("parts") or []:
-            text = part.get("text", "") if isinstance(part, dict) else str(part)
-            if _FULL_INFO_SENT_MARKER in text.lower():
+            text = (part.get("text", "") if isinstance(part, dict) else str(part)).lower()
+            if _FULL_INFO_SENT_MARKER in text or _POST_REG_SENT_MARKER in text:
                 return True
     return False
+
+
 
 
 # ⚠️ Skriptdan keyingi yo'naltirish QO'LLANMAYDIGAN holatlar. Bular
@@ -1500,6 +1513,21 @@ _INFO_INSISTENCE_PATTERNS = (
     # "nomerim yo'q", "raqamim yo'q" — kontakt bera olmaydi
     r"\b(?:nomer|raqam|telefon)\w*\s+yo[’'`]?q\b",
 )
+
+
+# Ro'yxatdan o'tgan mijoz kurs HAQIDA ma'lumot so'rayaptimi? (savol belgisi bilan ham, belgisiz ham)
+_POST_REG_INFO_PATTERNS = _INFO_INSISTENCE_PATTERNS + (
+    r"\bkurs\w*\s+haqida", r"\b(?:qanday|qanaqa)\s+kurs", r"\bnima\s+o[’'`]?rgat\w*",
+    r"\bdavomiy\w*", r"\bnecha\s+(?:oy|kun|soat|hafta)", r"\bqachon\s+boshla\w*",
+    r"\bnarx\w*", r"\bqancha\s+(?:turadi|bo[’'`]?ladi|so[’'`]?m)",
+)
+
+
+def _customer_requests_course_info(message: str) -> bool:
+    lowered = (message or "").lower()
+    for ch in "’‘`ʻʼ":
+        lowered = lowered.replace(ch, "'")
+    return any(re.search(p, lowered) for p in _POST_REG_INFO_PATTERNS)
 
 
 def _customer_declined_contact(history: list, current_message: str = "") -> bool:
@@ -2768,6 +2796,27 @@ def _call_gemini(store, customer, user_message: str, model_name: str = "gemini-3
                     text=f"{full_info}\n\n{_FULL_INFO_CONTACT_TAIL}",
                     tokens_used=tokens_used,
                     model_used=model_name,
+                    conversation_state=conversation_state,
+                )
+
+        # Mijoz kontaktini ALLAQACHON bergan va endi kurs haqida ma'lumot so'rayapti —
+        # kursning saqlangan to'liq matni BIR MARTA yuboriladi (keyingi so'rovlarda "yuqorida yuborgandim").
+        if getattr(customer, "phone_number", None) and _customer_requests_course_info(user_message):
+            if _full_info_already_sent(history):
+                return AIResponse(
+                    text=_FULL_INFO_REPEAT_TEXT, tokens_used=tokens_used, model_used=model_name,
+                    conversation_state=conversation_state,
+                )
+            product = _resolve_interested_product(store, customer, history)
+            full_info = (getattr(product, "full_info", "") or "").strip() if product else ""
+            if full_info:
+                logger.info(
+                    f"Ro'yxatdan o'tgan mijoz ma'lumot so'radi — to'liq matn yuborilmoqda | "
+                    f"do'kon={store.name} | kurs={product.name}"
+                )
+                return AIResponse(
+                    text=f"{full_info}\n\n{_POST_REGISTRATION_TAIL}",
+                    tokens_used=tokens_used, model_used=model_name,
                     conversation_state=conversation_state,
                 )
 

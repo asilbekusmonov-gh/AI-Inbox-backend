@@ -152,9 +152,70 @@ def _normalize_phone(raw_phone: str) -> tuple[Optional[str], Optional[str]]:
     if len(digits) == 12 and digits.startswith("998"):
         return f"+{digits}", None
 
+    # ⚠️ Do'kon egasi talabi (2026-10-28): Rossiya, Qozog'iston va Qirg'iziston raqamlari ham
+    # qabul qilinadi (mijozlar shu davlatlardan ham yozadi). Bular "+"siz ham ANIQ formatda:
+    #   • 11 xona, 7 yoki 8 bilan  → Rossiya/Qozog'iston ("89161234567", "79161234567");
+    #                                8 — mahalliy "trunk" prefiksi, +7 ga aylantiriladi
+    #   • 12 xona, 996 bilan       → Qirg'iziston ("996555123456")
+    # Boshqa uzunliklar (masalan 10 xona "9345678729") avvalgidek RAD etiladi — ular
+    # O'zbekistondagi "bitta ortiqcha raqam" xatosi.
+    if len(digits) == 11 and digits[0] in "78":
+        return f"+7{digits[1:]}", None
+    if len(digits) == 12 and digits.startswith("996"):
+        return f"+{digits}", None
+
     if len(digits) < _PHONE_MIN_DIGITS:
         return None, f"juda qisqa ({len(digits)} xona)"
     return None, f"noto'g'ri uzunlik ({len(digits)} xona)"
+
+
+def foreign_phone_label(phone: str) -> Optional[str]:
+    """
+    Raqam O'zbekiston raqami EMAS bo'lsa — davlat nomi bilan qisqa yorliq, aks holda None.
+    ("+79161234567" → "Rossiya, +7 916…", "+77011234567" → "Qozog'iston, +7 701…")
+    """
+    raw = (phone or "").strip()
+    digits = re.sub(r"\D", "", raw)
+    if not digits:
+        return None
+    # O'zbekiston: 9 xonali milliy yoki 998 bilan
+    if (len(digits) == 9 and not raw.startswith("+")) or digits.startswith("998"):
+        return None
+
+    shown = f"+{digits}"
+    if digits.startswith("7") and len(digits) == 11:
+        # Qozog'iston mobil/shahar kodlari 6xx va 7xx; Rossiya — qolganlari
+        country = "Qozog'iston" if digits[1] in "67" else "Rossiya"
+        return f"{country}, {shown}"
+    if digits.startswith("996"):
+        return f"Qirg'iziston, {shown}"
+    return f"xorijiy raqam, {shown}"
+
+
+def foreign_contact_note(*, phone: str, customer) -> str:
+    """
+    O'zbekiston raqami bo'lmagan mijoz uchun operatorga izoh: qo'ng'iroq o'rniga mijozning
+    Telegram shaxsiy akkaunti orqali bog'lanish (Bitrix24/Sheets/Excel izohiga qo'shiladi).
+    """
+    label = foreign_phone_label(phone)
+    if not label:
+        return ""
+
+    username = (getattr(customer, "username", "") or "").lstrip("@")
+    platform = getattr(customer, "platform", "")
+    user_id = getattr(customer, "platform_user_id", "")
+    if platform == "telegram" and username:
+        contact = f"@{username} (https://t.me/{username})"
+    elif platform == "telegram" and user_id:
+        contact = f"Telegram ID {user_id} (tg://user?id={user_id})"
+    elif username:
+        contact = f"@{username}"
+    else:
+        contact = "mijozning o'sha platformadagi suhbati"
+    return (
+        f"⚠️ O'zbekiston raqami emas ({label}) — qo'ng'iroq o'rniga Telegram orqali "
+        f"bog'laning: {contact}."
+    )
 
 
 # ⚠️ Yaroqsiz raqam yuborilganda mijozga ko'rsatiladigan YAGONA matn
@@ -412,6 +473,12 @@ def create_lead_from_ai_data(
                 product_name=getattr(interested_course, "name", "") or "",
                 exclude_text="",
             )
+
+        # Xorijiy (O'zbekistonniki bo'lmagan) raqam — operatorga Telegram orqali bog'lanishni eslatamiz.
+        # Izoh Bitrix24, Google Sheets va Excel'ga AYNAN shu matn bilan boradi.
+        foreign_note = foreign_contact_note(phone=phone, customer=customer)
+        if foreign_note:
+            notes = f"{notes}\n{foreign_note}".strip()
 
         recent_duplicate = Lead.objects.filter(
             store=store, customer=customer, is_deleted=False,

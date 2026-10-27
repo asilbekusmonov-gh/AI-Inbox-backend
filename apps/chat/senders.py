@@ -441,6 +441,16 @@ def _format_lead_notification(lead) -> str:
     if customer and getattr(customer, "username", None):
         username_text = f"🔗 <b>Telegram:</b> @{escape_html(customer.username)}\n"
 
+    # O'zbekiston raqami bo'lmagan mijoz — egasi qo'ng'iroq qilmasdan, Telegram orqali yozishi kerak
+    foreign_text = ""
+    from apps.chat.lead_service import foreign_phone_label
+    foreign_label = foreign_phone_label(lead.customer_phone)
+    if foreign_label:
+        foreign_text = (
+            f"⚠️ <b>Xorijiy raqam ({escape_html(foreign_label)}):</b> "
+            f"qo'ng'iroq o'rniga Telegram orqali bog'laning\n"
+        )
+
     return (
         f"🆕 <b>YANGI LEAD!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -448,6 +458,7 @@ def _format_lead_notification(lead) -> str:
         f"👤 <b>Ism:</b> {escape_html(lead.customer_full_name)}\n"
         f"{username_text}"
         f"📞 <b>Tel:</b> {escape_html(lead.customer_phone)}\n"
+        f"{foreign_text}"
         f"{course_text}"
         f"🌡 <b>Holat:</b> {status_text}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
