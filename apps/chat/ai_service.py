@@ -2460,6 +2460,27 @@ def _store_catalog_blob(store) -> str:
     return " ".join(" ".join(str(v or "") for v in row) for row in rows).lower()
 
 
+# ⚠️ Jonli aniqlangan muammo (2026-10-28): mijoz "hackerlik kursi bormi sizlarda" deb so'radi — filtr
+# "hack" so'zini mavzu deb bloklab, "faqat ushbu markazning kurslari bo'yicha yordam bera olaman"
+# degan rad matnini qaytardi. Bu — oddiy KURS SAVOLI: "bizda bunday kurs yo'q" deb javob berish kerak
+# (AI buni katalog asosida qiladi), rad etish emas. Mavzu filtri "hack qilishni o'rgating" kabi
+# TALABLARNI to'xtatish uchun; kurs MAVJUDLIGI/NARXI haqidagi savol esa o'tkaziladi.
+# Istisno: jinsiy mavzu har doim bloklanadi.
+_COURSE_INQUIRY_COURSE_RE = re.compile(
+    r"\b(?:kurs\w*|dars\w*|yo[’'`ʻ]?nalish\w*|o[’'`ʻ]?quv\w*|курс\w*)", re.IGNORECASE | re.UNICODE,
+)
+_COURSE_INQUIRY_ASK_RE = re.compile(
+    r"(?:bormi|bor\s*mi|mavjud|narx|qancha|necha|yozil|haqida|ma[’'`ʻ]?lumot|bo[’'`ʻ]?ladimi|"
+    r"boladimi|kerak\s+edi|bormikan|есть\s+ли|сколько)", re.IGNORECASE | re.UNICODE,
+)
+_NEVER_EXEMPT_TOPICS = {"jinsiy"}
+
+
+def _is_course_inquiry(msg_lower: str) -> bool:
+    """Xabar kurs/yo'nalish MAVJUDLIGI, narxi yoki ma'lumoti haqidagi savolmi?"""
+    return bool(_COURSE_INQUIRY_COURSE_RE.search(msg_lower) and _COURSE_INQUIRY_ASK_RE.search(msg_lower))
+
+
 def check_content_safety(user_message: str, store=None) -> tuple[bool, str]:
     """
     So'kinish, haqorat, nojo'ya mavzular va Prompt Injection (Jailbreak) xabarlarini filtrlash.
@@ -2475,11 +2496,18 @@ def check_content_safety(user_message: str, store=None) -> tuple[bool, str]:
             return True, "Iltimos, o'zaro muloqotda odob va hurmat qoidalariga rioya qiling. Bot faqat ushbu do'konning rasmiy mahsulotlari va xizmatlari bo'yicha yordam beradi. 😊"
 
     catalog_blob = None
+    is_course_question = _is_course_inquiry(msg_lower)
     for topic, patterns in _OFF_TOPIC_PATTERNS.items():
         for pattern in patterns:
             match = re.search(pattern, msg_lower)
             if not match:
                 continue
+            if is_course_question and topic not in _NEVER_EXEMPT_TOPICS:
+                logger.info(
+                    f"[Moderatsiya] Kurs haqidagi savol — mavzu filtri o'tkazib yuborildi | mavzu={topic} | "
+                    f"so'z={match.group(0)!r} | do'kon={getattr(store, 'name', '?')}"
+                )
+                break
             if store is not None:
                 if catalog_blob is None:
                     catalog_blob = _store_catalog_blob(store)
@@ -2519,6 +2547,11 @@ def get_ai_response(store, customer, user_message: str, is_group: bool = False) 
     # 1. So'kinish, Haqorat va Prompt Injection tekshiruvi
     is_unsafe, safety_msg = check_content_safety(user_message, store)
     if is_unsafe:
+        # ⚠️ Guruhda bot suhbatlashmaydi: mavzudan tashqari/nojo'ya xabarga "men faqat shu markaz
+        # kurslari bo'yicha yordam bera olaman, qaysi yo'nalish qiziq?" kabi rad matni (hatto SAVOL bilan)
+        # yozish guruhni shovqinga to'ldiradi — jim turiladi.
+        if is_group:
+            return AIResponse(text="", tokens_used=0, model_used=store.ai_model, is_silent=True)
         return AIResponse(
             text=safety_msg,
             tokens_used=0,

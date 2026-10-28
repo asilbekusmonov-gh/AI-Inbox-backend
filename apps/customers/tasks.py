@@ -108,9 +108,10 @@ def _sample_product_names(store, limit: int = 2) -> list[str]:
     """Follow-up matnida misol sifatida ko'rsatiladigan haqiqiy kurs/xizmat nomlari."""
     from apps.products.models import Product
 
-    return list(
-        Product.objects.filter(store=store, is_active=True).values_list("name", flat=True)[:limit]
-    )
+    names = Product.objects.filter(store=store, is_active=True).values_list("name", flat=True)[:limit]
+    # Uzun nomlar ("Python Backend Development: Professional Dasturlash Kursi") misolda xunuk
+    # chiqadi — ikki nuqta yoki tire'gacha bo'lgan asosiy qismi olinadi.
+    return [re.split(r"\s*[:–—]\s*", name, maxsplit=1)[0].strip() or name for name in names]
 
 
 def _build_followup_text(tier: str, stage: int, store, course: str | None) -> str:
@@ -120,6 +121,13 @@ def _build_followup_text(tier: str, stage: int, store, course: str | None) -> st
     quradi. Bitta katta .format() shablon o'rniga qismlarga bo'lib
     quriladi — chunki ixtiyoriy qismlar (kurs nomi, misollar) bo'lmasa
     ham grammatik jihatdan tabiiy chiqishi kerak.
+
+    ⚠️ Matnlar botning HOZIRGI qoidalariga mos (2026-10-28):
+      • "Kecha yozgandingiz" EMAS — eslatma 6 soatdan keyin ketadi, ya'ni ko'pincha o'sha
+        kunning o'zida, shuning uchun vaqtga bog'liq bo'lmagan "Yaqinda" ishlatiladi
+      • narx/ma'lumot VA'DA QILINMAYDI — bot kontaktsiz narx bermaydi
+      • "administrator/operator" emas, "mutaxassislarimiz"
+      • o'ylab topilgan da'volar ("joylar tez to'lib qoladi") yo'q
     """
     label = "kurs" if getattr(store, "category_type", "education") == "education" else "xizmat"
 
@@ -128,9 +136,9 @@ def _build_followup_text(tier: str, stage: int, store, course: str | None) -> st
             examples = _sample_product_names(store)
             examples_str = f" (masalan, {', '.join(examples)})" if examples else ""
             return (
-                f"Salom 😊 Kecha bizning botimizga kirgandingiz. "
+                f"Salom 😊 Botimizga kirgandingiz. "
                 f"Sizni qaysi {label}imiz qiziqtirgandi{examples_str}? "
-                f"Yozib yuborsangiz, mos variantlarni aytib beraman."
+                f"Yozib yuborsangiz, yordam beraman."
             )
         return (
             f"Salom yana bir bor 🙂 Agar hali ham {label} tanlashda "
@@ -138,36 +146,34 @@ def _build_followup_text(tier: str, stage: int, store, course: str | None) -> st
             f"men yordam beraman."
         )
 
+    course_ref = f" {course} bo'yicha" if course else ""
+    about = f" {course} haqida" if course else ""
+
     if tier == "engaged_no_contact":
-        course_ref = f" {course} bo'yicha" if course else ""
         if stage == 1:
             return (
-                f"Salom 😊 Kecha{course_ref} yozgandingiz. Agar hali ham "
-                f"qiziqayotgan bo'lsangiz, sizga narxi va yaqin guruhlar "
-                f"haqida ma'lumot berib qo'yishim mumkin. Qaysi variant "
-                f"sizga qulayroq?"
+                f"Salom 😊 Yaqinda{course_ref} yozgandingiz. Agar hali ham "
+                f"qiziqayotgan bo'lsangiz, ism-familiyangiz va telefon raqamingizni "
+                f"qoldiring — mutaxassislarimiz sizga{about} batafsil ma'lumot berishadi."
             )
         return (
             f"Salom!{course_ref} savolingiz hali ham dolzarbmi? "
-            f"Bemalol yozing, aniqlashtirib beraman 🙌"
+            f"Bemalol yozing, yordam beraman 🙌"
         )
 
     # tier == "high_intent" — mijoz allaqachon aniq qiziqish bildirgan,
     # shuning uchun CTA ochiqroq. Mijoz ALLAQACHON shaxsiy chatda bo'lgani
     # uchun tashqi havola shart emas — to'g'ridan-to'g'ri ism/raqam
     # so'raladi (AI keyingi javobda buni odatdagidek lidga aylantiradi).
-    course_ref = f" {course} bo'yicha" if course else ""
     if stage == 1:
         return (
-            f"Salom! 😊 Kecha{course_ref} gaplashgandik. Agar xohlasangiz, "
-            f"sizga mos guruhni aniqlab beramiz — buning uchun ismingiz va "
-            f"telefon raqamingizni yozib qoldirsangiz, administratorimiz "
-            f"siz bilan bog'lanadi."
+            f"Salom! 😊 Yaqinda{course_ref} gaplashgandik. Agar xohlasangiz, "
+            f"sizga mos guruhni aniqlab berishimiz uchun ism-familiyangiz va "
+            f"telefon raqamingizni qoldiring — mutaxassislarimiz siz bilan bog'lanadi."
         )
     return (
-        f"Yana bir bor salom! Joylar tez to'lib qolishi mumkin — agar hali "
-        f"ham qiziqsangiz, ismingiz va raqamingizni yozib qoldiring, "
-        f"administratorimiz bog'lanadi 🙌"
+        f"Yana bir bor salom! Agar hali ham qiziqsangiz, ism-familiyangiz va "
+        f"telefon raqamingizni qoldiring — mutaxassislarimiz bog'lanadi 🙌"
     )
 
 
@@ -283,6 +289,27 @@ def _process_stage(store, stage: int, delay_hours: int, now, lookback_cutoff) ->
     return sent_count, failed_count
 
 
+def _is_quiet_hours(now) -> bool:
+    """
+    Hozir tungi (eslatma yuborilmaydigan) soatlarmi? (Asia/Tashkent vaqti bilan)
+
+    ⚠️ Avval tungi cheklov yo'q edi: mijoz kechqurun 21:00 da jim qolsa, 1-eslatma
+    6 soatdan keyin, ya'ni soat 03:00 da ketardi. Endi shu oraliqda hech narsa
+    yuborilmaydi — eslatma ertalab (09:00 dan keyin) ketadi, chunki mijozning jim
+    qolgani (last_message_at) o'sha vaqtgacha o'zgarmaydi.
+    """
+    from django.conf import settings
+
+    start = int(getattr(settings, "FOLLOW_UP_QUIET_START_HOUR", 21))
+    end = int(getattr(settings, "FOLLOW_UP_QUIET_END_HOUR", 9))
+    if start == end:
+        return False
+    hour = timezone.localtime(now).hour
+    if start < end:
+        return start <= hour < end
+    return hour >= start or hour < end     # yarim tundan o'tadigan oraliq (21 -> 09)
+
+
 @shared_task(
     name="apps.customers.tasks.send_followup_messages",
     bind=True,
@@ -302,6 +329,8 @@ def send_followup_messages(self):
     from apps.stores.models import Store
 
     now = timezone.now()
+    if _is_quiet_hours(now):
+        return {"sent": 0, "failed": 0, "skipped": "quiet_hours"}
     lookback_cutoff = now - timedelta(days=_MAX_LOOKBACK_DAYS)
 
     stores = Store.objects.filter(

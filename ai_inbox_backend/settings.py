@@ -431,6 +431,13 @@ CHAT_MESSAGE_RETENTION_DAYS = int(env("CHAT_MESSAGE_RETENTION_DAYS", default="90
 # qanday kodga tegish shart emas.
 BROADCAST_DAILY_LIMIT_PER_STORE = int(env("BROADCAST_DAILY_LIMIT_PER_STORE", default="1"))
 
+# Javobsiz qolgan mijozga avtomatik eslatma (follow-up) YUBORILMAYDIGAN tungi soatlar
+# (Asia/Tashkent vaqti bilan, [boshlanish, tugash) — odatda 21:00 dan 09:00 gacha).
+# Mijoz kechqurun jim qolsa, eslatma ertalab soat 09:00 da ketadi. Bir xil qiymat
+# berilsa (masalan 0 va 0) cheklov o'chiriladi.
+FOLLOW_UP_QUIET_START_HOUR = int(env("FOLLOW_UP_QUIET_START_HOUR", default="21"))
+FOLLOW_UP_QUIET_END_HOUR = int(env("FOLLOW_UP_QUIET_END_HOUR", default="9"))
+
 # Mijoz ketma-ket yozgan xabarlarni birlashtirish uchun kutish oynasi (soniya).
 # Mijoz shu vaqt ichida yana yozsa, bot to'xtab turib hammasini birga o'qiydi va
 # BITTA javob beradi. 0 — o'chirilgan (har xabarga darrov alohida javob).

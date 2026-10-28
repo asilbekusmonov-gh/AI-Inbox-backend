@@ -190,6 +190,39 @@ def _strip_html_tags(text: str) -> str:
     return _HTML_TAG_RE.sub("", text)
 
 
+def _human_message_covers_customer(human_msg, customer, customer_message_id, store) -> bool:
+    """
+    Guruhda ega/xodimning xabari SHU mijozning savoliga qaratilganmi yoki sotuv haqidami?
+
+    ⚠️ Jonli aniqlangan muammo (2026-10-28): mijoz guruhga "kurs haqida ma'lumot bera olasizlarmi
+    python kursiga" deb yozdi. 3 soniyadan keyin ega guruhga BOSHQA odamga qaratilgan, sotuvga
+    aloqasiz xabar yozdi. Eski qoida "ega istalgan xabar yozsa — bot jim" edi, shuning uchun bot
+    tayyor javobini yubormadi. Endi bot FAQAT quyidagi hollarda jim bo'ladi (ega o'sha mijozga
+    javob berayotgani ehtimoli yuqori):
+      • ega/xodim mijozning xabariga yoki mijozga REPLY qilgan
+      • ega/xodim mijozni @username bilan tilga olgan
+      • ega/xodim xabari o'zi sotuv/kurs haqida (narx, kurs, manzil ...) — ya'ni mijozlar bilan
+        savdo suhbatini o'zi yuritayapti
+    """
+    payload = human_msg.raw_payload if isinstance(human_msg.raw_payload, dict) else {}
+    message = payload.get("message") or payload.get("edited_message") or {}
+    reply = message.get("reply_to_message") or {}
+    if reply:
+        reply_from_id = str((reply.get("from") or {}).get("id", ""))
+        if reply_from_id and reply_from_id == str(customer.platform_user_id):
+            return True
+        if str(reply.get("message_id", "")) == str(customer_message_id):
+            return True
+
+    text = human_msg.content or ""
+    username = (getattr(customer, "username", "") or "").lstrip("@")
+    if username and re.search(rf"@{re.escape(username)}\b", text, re.IGNORECASE):
+        return True
+
+    from apps.chat.group_filter import is_sales_relevant
+    return is_sales_relevant(text, store)
+
+
 def _send_command_reply(store, customer, platform, chat_id, text, parse_mode="HTML", reply_markup=None, is_group_message=False, reply_to_message_id=None):
     """
     Buyruq (/start, /dashboard, /help) javobini yuboradi VA uni
@@ -1287,13 +1320,29 @@ def process_incoming_message(
                             store=store, username__in=staff_usernames
                         ).values_list("platform_user_id", flat=True)
                     )
-                if human_ids and ChatMessage.objects.filter(
-                    store=store, chat_id=str(chat_id), is_group_message=True,
-                    customer__platform_user_id__in=human_ids,
-                    created_at__gt=chat_message.created_at,
-                ).exists():
+                later_human_messages = []
+                if human_ids:
+                    later_human_messages = list(
+                        ChatMessage.objects.filter(
+                            store=store, chat_id=str(chat_id), is_group_message=True,
+                            customer__platform_user_id__in=human_ids,
+                            created_at__gt=chat_message.created_at,
+                        ).order_by("created_at")[:10]
+                    )
+                if any(
+                    _human_message_covers_customer(m, customer, message_id, store)
+                    for m in later_human_messages
+                ):
                     logger.info(
-                        f"[Task] Guruhda ega/xodim allaqachon javob bergan — AI javobi yuborilmadi | store={store.name}"
+                        f"[Task] Guruhda ega/xodim shu mijozga javob bermoqda — AI javobi yuborilmadi | store={store.name}"
+                    )
+                    # ⚠️ Bekor qilingan javob "yuborilgan" bo'lib, savol esa "jarayonda" bo'lib qolmasin:
+                    # ikkalasi ham SKIPPED — AI keyingi suhbatda mijoz ko'rmagan javobni "o'ziniki" deb o'qimaydi.
+                    ChatMessage.objects.filter(id=ai_message.id).update(
+                        processing_status=ChatMessage.ProcessingStatus.SKIPPED
+                    )
+                    ChatMessage.objects.filter(id=chat_message.id).update(
+                        processing_status=ChatMessage.ProcessingStatus.SKIPPED
                     )
                     return
 
@@ -1303,15 +1352,35 @@ def process_incoming_message(
                 # yubormaydi. To'g'ridan-to'g'ri @mention/reply qilingan
                 # aniq savol bu cheklovdan chetlanadi — aniq so'ralgan
                 # savol har doim javobsiz qolmasligi kerak.
+                #
+                # ⚠️ Jonli aniqlangan muammo (2026-10-28): mijoz guruhda "hackerlik kursi bormi?" deb so'radi,
+                # bot havola yubordi. 12 soniyadan keyin o'sha mijoz "yozilmoqchi edim" dedi — bot
+                # "Ro'yxatdan o'tish" javobini tayyorladi, lekin sovutish qoidasi uni to'sdi va eng qimmatli
+                # (yozilmoqchi bo'lgan) mijoz javobsiz qoldi. Qoida guruhga BOSHQA odamlarga ketma-ket
+                # javob yozib shovqin qilmaslik uchun; shuning uchun ikki istisno:
+                #   1. javob o'sha mijozning O'ZIGA (sovutishni boshlagan odamga) — u suhbatni davom ettiryapti
+                #   2. javob "Ro'yxatdan o'tish" havolasi (yozilmoqchi mijoz) — hech qachon to'silmaydi
                 if not _is_message_addressed_to_bot(raw_payload, store):
                     cooldown_key = f"group_reply_cooldown:{store.id}:{chat_id}"
-                    if not cache.add(cooldown_key, True, timeout=GROUP_REPLY_COOLDOWN_SECONDS):
-                        logger.info(
-                            f"[Task] Guruhda bot sovutish vaqtida — AI javobi yuborilmadi | store={store.name}"
-                        )
-                        return
+                    _is_registration_reply = "start=register_" in (ai_response.text or "")
+                    # Sovutish yo'q edi — kalit endi shu mijoz nomiga yozildi, javob yuboriladi
+                    if not cache.add(cooldown_key, str(customer.id), timeout=GROUP_REPLY_COOLDOWN_SECONDS):
+                        # Sovutish allaqachon bor — kim boshlagan?
+                        if _is_registration_reply or cache.get(cooldown_key) == str(customer.id):
+                            cache.set(cooldown_key, str(customer.id), timeout=GROUP_REPLY_COOLDOWN_SECONDS)
+                        else:
+                            logger.info(
+                                f"[Task] Guruhda bot sovutish vaqtida — AI javobi yuborilmadi | store={store.name}"
+                            )
+                            ChatMessage.objects.filter(id=ai_message.id).update(
+                                processing_status=ChatMessage.ProcessingStatus.SKIPPED
+                            )
+                            ChatMessage.objects.filter(id=chat_message.id).update(
+                                processing_status=ChatMessage.ProcessingStatus.SKIPPED
+                            )
+                            return
                 else:
-                    cache.set(f"group_reply_cooldown:{store.id}:{chat_id}", True, timeout=GROUP_REPLY_COOLDOWN_SECONDS)
+                    cache.set(f"group_reply_cooldown:{store.id}:{chat_id}", str(customer.id), timeout=GROUP_REPLY_COOLDOWN_SECONDS)
 
             # ── 6. Lid aniqlangan bo'lsa — javobni YUBORISHDAN OLDIN Lead
             # HAQIQATDA saqlanganini tekshiramiz.
